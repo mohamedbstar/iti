@@ -36,21 +36,48 @@ replaceMultipleSpaces(){
 
 	echo "$output"
 }
+#=================================== UTILITY FUNCTIONS ==============================
 
+#when program starts ===> read all databases and store their names in the global variables dbs_list
 readAllDatabases(){
 	db_list=$(ls -l | tail +2 | grep ^d)
 	db_list=$(replaceMultipleSpaces "$db_list" | cut -d' ' -f9)
 	dbs_list="$db_list"
 }
 
-#when program starts ===> read all databases and store their names in the global variables dbs_list
+#handle the select command
+do_select(){
+	selected_columns=""
+	if [[ "$user_cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]*\*[[:space:]]*[Ff][Rr][Oo][Mm] ]]; then
+		selected_columns="*"
+	elif [[ "$user_cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alpha:]][[:alnum:][:space:]_,]+)[Ff][Rr][Oo][Mm] ]]; then
+		selected_columns="${BASH_REMATCH[1]}"
+	fi
+	echo "selected columns are: $selected_columns"
+}
+
+#handle the insert command
+do_insert(){
+	echo ""
+}
+
+#handle the delete command
+do_delete(){
+	echo ""
+}
+
+#handle the update command
+do_update(){
+	echo ""
+}
+
 readAllDatabases
 
 while true; do
 	
 	read -p "> " user_cmd
 	case "$user_cmd" in
-	"exi"* )
+	"ex"* )
 		exit
 		;;
 	"show databases"?(";") )
@@ -68,22 +95,42 @@ while true; do
 		if [[ -n $exists ]]; then
 			#the database exists
 			cur_db=$input_db
-			echo "You are now operating on database:  " $cur_db
+			echo "You are now operating on database:" $cur_db
 		else
 			#database doesn't exist
 			echo "The database you entered doesn't exist."
 		fi
 		;;
-
+	"create database "+([a-zA-Z])*([0-9])@(';'))
+		echo "Creating a database"
+		;;
 	"show tables"?(";") )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
 		else
-			
+			cur_db_tables_list=$(ls -l "$cur_db/" | grep ^-)
+			cur_db_tables_list=$(replaceMultipleSpaces "$cur_db_tables_list" | cut -d' ' -f9)
+			echo "$cur_db_tables_list"
 		fi
 		;;
+	@("select "*|"SELECT "*))
+		echo "selecting..."
+		do_select "$user_cmd"
+		;;
+	@("insert "*|"INSERT "*))
+		echo "inserting..."
+		do_insert "$user_cmd"
+		;;
+	@("delete "*|"DELETE "*))
+		echo "deleting..."
+		do_delete "$user_cmd"
+		;;
+	@("update "*|"UPDATE "*))
+		echo "updating..."
+		do_update "$user_cmd"
+		;;
 	*)
-		echo "something else"
+		echo "invalid syntax."
 		;;
 	esac
 done
