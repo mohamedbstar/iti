@@ -58,6 +58,7 @@ do_select(){
 
 #handle the insert command
 do_insert(){
+	#the syntax is: insert into <table[fields?]> values ()
 	echo ""
 }
 
@@ -71,19 +72,27 @@ do_update(){
 	echo ""
 }
 
+do_create_table(){
+	cmd="$1"
+	
+}
+
+#when starting the program ==> load all database names in the global variable dbs_list
 readAllDatabases
 
 while true; do
 	
 	read -p "> " user_cmd
 	case "$user_cmd" in
-	"ex"* )
+	@("ex"|"EX")* )
 		exit
 		;;
-	"show databases"?(";") )
+
+	@("show databases"|"SHOW DATABASES")?(";") )
 		echo "$dbs_list"
 		;;
-	"use "+([a-zA-Z0-9])?(";"))
+
+	@("use " | "USE ")+([a-zA-Z0-9])?(";"))
 		#parse the user command
 		input_db=$(echo "$user_cmd" | cut -d' ' -f2)
 		if [[ "$input_db" == *\; ]]; then
@@ -101,10 +110,34 @@ while true; do
 			echo "The database you entered doesn't exist."
 		fi
 		;;
-	"create database "+([a-zA-Z])*([0-9])@(';'))
-		echo "Creating a database"
+
+	@("create database "|"CREATE DATABASE ")+([a-zA-Z])*([0-9a-zA-Z])@(';') )
+		echo "Creating a database..."
+		#parse the user command
+		db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" )
+		#see if there is already existing database with the given name or not
+		exists=$(echo "$dbs_list" | grep "^$db_name$")
+		if [[ -n $exists ]]; then
+			#there exists a database with that name
+			echo "Database Already Exists."
+		else
+			#create a new folder with the given name
+			mkdir "$db_name"
+			#update the dbs_list variable
+			dbs_list+=$'\n'$db_name
+			dbs_list=$(echo "$dbs_list" | sort -k1)
+		fi
+		
 		;;
-	"show tables"?(";") )
+
+	@("create table " | "CREATE TABLE ")+([a-zA-Z])*([0-9a-zA-Z])@(';') )
+		if [[ -z "$cur_db" ]]; then
+			echo "No database selected. Please select a database first."
+		else
+			do_create_table "$user_cmd"
+		fi
+		;;
+	@("show tables"|"SHOW TABLES")?(";") )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
 		else
@@ -113,22 +146,27 @@ while true; do
 			echo "$cur_db_tables_list"
 		fi
 		;;
+
 	@("select "*|"SELECT "*))
 		echo "selecting..."
 		do_select "$user_cmd"
 		;;
+
 	@("insert "*|"INSERT "*))
 		echo "inserting..."
 		do_insert "$user_cmd"
 		;;
+
 	@("delete "*|"DELETE "*))
 		echo "deleting..."
 		do_delete "$user_cmd"
 		;;
+
 	@("update "*|"UPDATE "*))
 		echo "updating..."
 		do_update "$user_cmd"
 		;;
+
 	*)
 		echo "invalid syntax."
 		;;
