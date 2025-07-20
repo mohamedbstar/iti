@@ -125,12 +125,14 @@ do_create_table(){
 			pk="$p_k"
 		fi
 		#write info in the file
-		(echo "$line" >> "$cur_db/.db")
+		(echo "$line" >> "$cur_db/.$table_to_create")
 	done <<< "$columns"
 	#create a file 
 	(touch "$cur_db/$table_to_create")
 	#update cur_db_tables variable
 	cur_db_tables+=$'\n'"$table_to_create"
+	#add the table to the .db file
+	(echo "$table_to_create" >> "$cur_db/.db")
 }
 #handles alter table command
 do_alter_table(){
@@ -163,7 +165,8 @@ do_drop_table(){
 	fi
 	#remove table from .db and delete its file
 	(rm "$cur_db/$table_to_drop")
-	(sed '/^'"$table_to_drop"'$/d' "$cur_db/.db")
+	(rm "$cur_db/.$table_to_drop")
+	(sed -i '/^'"$table_to_drop"'$/d' "$cur_db/.db")
 	#update the variable cur_db_tables
 	#cur_db_tables=$(echo "$cur_db_tables" | awk -v tname="$table_to_drop" '{
 	#	if($0 == tname){
@@ -213,8 +216,43 @@ do_select(){
 
 #handle the insert command
 do_insert(){
-	#the syntax is: insert into <table[fields?]> values ()
-	echo ""
+	if [[ -z "$cur_db" ]]; then
+		echo "You must USE a database to insert."
+		return
+	fi
+	#the syntax is: insert into <table [fields?] > values ()
+	table_to_insert=""
+	cmd="$1"
+	fields_to_insert=""
+	values_to_insert=""
+	#get table name
+	if [[ $cmd =~ [Ii][Nn][Ss][Ee][Rr][Tt][[:space:]]+[Ii][Nn][Tt][Oo][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*[(]?[[:space:]a-zA-Z0-9_,-]*[)]?[[:space:]]*[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
+		table_to_insert="${BASH_REMATCH[1]}"
+		echo "table name is: $table_to_insert"
+	else
+		echo "Invalid table name."
+		return
+	fi
+	#get fields if existing
+	if [[ "$cmd" =~  [Ii][Nn][Tt][Oo][[:space:]]+[a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*([\(][[:space:]a-zA-Z0-9_,-]*[\)][[:space:]]*)[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
+		fields_to_insert="${BASH_REMATCH[1]}"
+		#trim these fields
+		fields_to_insert=$(echo "$fields_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+		fields_to_insert=$(echo "$fields_to_insert" | awk 'BEGIN { FS="," } { print $1":",$2 }' | tr -d ' ' | tr -d ')' | tr -d  '(')
+	fi
+	#get values to insert
+	if [[ "$cmd" =~ [Vv][Aa][Ll][Uu][Ee][Ss][[:space:]]*([^\)]+) ]]; then
+		values_to_insert="values are: ${BASH_REMATCH[1]}"
+	else
+		echo "You must provide values to insert into the table"
+		return
+	fi
+	#check equal number of values and fields if exist
+	#if not check values are equal to table fields in type and number
+	#check the table name exists in cur_db
+	#check fields exist in the table
+	#if there is a field that is a primary key, check the consistency
+
 }
 
 #handle the delete command
@@ -337,8 +375,7 @@ while true; do
 		do_select "$user_cmd"
 		;;
 
-	@("insert "*|"INSERT "*))
-		echo "inserting..."
+	@("insert "*|"INSERT "*) )
 		do_insert "$user_cmd"
 		;;
 
