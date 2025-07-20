@@ -74,7 +74,7 @@ do_update(){
 
 do_create_table(){
 	cmd="$1"
-	
+
 }
 
 #when starting the program ==> load all database names in the global variable dbs_list
@@ -123,6 +123,7 @@ while true; do
 		else
 			#create a new folder with the given name
 			mkdir "$db_name"
+			touch "$db_name/.db"
 			#update the dbs_list variable
 			dbs_list+=$'\n'$db_name
 			dbs_list=$(echo "$dbs_list" | sort -k1)
@@ -137,6 +138,10 @@ while true; do
 			do_create_table "$user_cmd"
 		fi
 		;;
+		
+	@("alter table " | "ALTER TABLE "))
+		;;
+
 	@("show tables"|"SHOW TABLES")?(";") )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
