@@ -7,7 +7,11 @@ cur_db=""
 last_output=""
 
 dbs_list=""
+cur_db_tables=""
 
+
+
+#=================================== UTILITY FUNCTIONS ==============================
 
 replaceMultipleSpaces(){
 	string=$1
@@ -36,7 +40,6 @@ replaceMultipleSpaces(){
 
 	echo "$output"
 }
-#=================================== UTILITY FUNCTIONS ==============================
 
 #when program starts ===> read all databases and store their names in the global variables dbs_list
 readAllDatabases(){
@@ -45,15 +48,50 @@ readAllDatabases(){
 	dbs_list="$db_list"
 }
 
+#handles alter table command
+do_alter_table(){
+	echo "altering"
+}
+
+#handles drop table command
+do_drop_table(){
+	echo "dropping"
+}
+
 #handle the select command
 do_select(){
+	#check if there is a current database selected or not
+	if [[ -z "$cur_db" ]]; then
+		echo "You must USE a database to begin selecting."
+		return
+	fi
+
+	#first extract columns to be selected
 	selected_columns=""
 	if [[ "$user_cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]*\*[[:space:]]*[Ff][Rr][Oo][Mm] ]]; then
 		selected_columns="*"
 	elif [[ "$user_cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alpha:]][[:alnum:][:space:]_,]+)[Ff][Rr][Oo][Mm] ]]; then
 		selected_columns="${BASH_REMATCH[1]}"
+	else
+		echo "You must provide at least one column to select."
+		return
 	fi
+	selected_columns=$(echo "$selected_columns" | tr -d ' ')
 	echo "selected columns are: $selected_columns"
+	#then extract the table name to select from
+	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]([a-zA-Z][a-zA-Z0-9_-]+[[:space:]]*;[[:space:]]*) ]]; then
+		#statements
+		table_name="${BASH_REMATCH[1]}"
+		#trim the table name
+		table_name=$(echo "$table_name" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+		table_name=$(echo "$table_name" | sed 's/;$//')
+		echo "trimmed table name: $table_name"
+	else
+		echo "You must provide a table name."
+		return
+	fi
+
+	#check if there is a table by this name in the cur_db or not
 }
 
 #handle the insert command
@@ -80,6 +118,7 @@ do_create_table(){
 #when starting the program ==> load all database names in the global variable dbs_list
 readAllDatabases
 
+#program main loop
 while true; do
 	prompt="> "
 	user_cmd=""
@@ -105,7 +144,7 @@ while true; do
 		echo "$dbs_list"
 		;;
 
-	@("use " | "USE ")*([[:space:]])+([a-zA-Z0-9])?(";")*([[:space:]]))
+	@("use "|"USE ")*([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@([;])*([[:space:]]) )
 		#parse the user command
 		input_db=$(echo "$user_cmd" | cut -d' ' -f2)
 		if [[ "$input_db" == *\; ]]; then
@@ -117,6 +156,7 @@ while true; do
 		if [[ -n $exists ]]; then
 			#the database exists
 			cur_db=$input_db
+			#load the tables inside cur_db into cur_db_tables
 			echo "You are now operating on database:" $cur_db
 		else
 			#database doesn't exist
@@ -142,8 +182,11 @@ while true; do
 			dbs_list=$(echo "$dbs_list" | sort -k1)
 		fi
 		;;
-		
-	@("create table "|"CREATE TABLE ")+([a-zA-Z])?([[:space:]])"("+([a-zA-Z0-9,_[:space:]])")"@(';')*([[:space:]]) )
+	@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+		echo "Dropping database..."
+		;;
+
+	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])"("+([a-zA-Z0-9,_[:space:]])")"@(';')*([[:space:]]) )
 
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
@@ -152,9 +195,13 @@ while true; do
 		fi
 		;;
 		
-	@("alter table " | "ALTER TABLE "))
+	@("alter table "|"ALTER TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+		do_alter_table "$user_cmd"
 		;;
 
+	@("drop table "|"DROP TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+		do_drop_table "$user_cmd"
+		;;
 	@("show tables"|"SHOW TABLES")?(";")*([[:space:]]) )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
