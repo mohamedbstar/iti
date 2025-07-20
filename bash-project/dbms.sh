@@ -88,27 +88,24 @@ while true; do
 			prompt="--"
 		fi
     	read -p "$prompt" line
-    	if [[ $line == ^ $'\n'$ ]]; then
-    		continue
-    	fi
-    	user_cmd+="$line"$'\n '
+    	user_cmd+="$line"$'\n'
 
     	[[ "$line" == *";" ]] && break
 	done
 
 	#normalize the input to be all without new lines
-	user_cmd=$(echo "$user_cmd" | tr $'\n' ' ')
+	user_cmd=$(echo "$user_cmd" | tr $'\n' ' ' )
 
 	case "$user_cmd" in
-	@("ex"|"EX")* )
+	@("ex"|"EX")**([[:space:]])";"*([[:space:]]) )
 		exit
 		;;
 
-	@("show databases"|"SHOW DATABASES")?(";") )
+	@("show databases"|"SHOW DATABASES")?(";")*([[:space:]]) )
 		echo "$dbs_list"
 		;;
 
-	@("use " | "USE ")+([a-zA-Z0-9])?(";"))
+	@("use " | "USE ")*([[:space:]])+([a-zA-Z0-9])?(";")*([[:space:]]))
 		#parse the user command
 		input_db=$(echo "$user_cmd" | cut -d' ' -f2)
 		if [[ "$input_db" == *\; ]]; then
@@ -127,7 +124,7 @@ while true; do
 		fi
 		;;
 
-	@("create database "|"CREATE DATABASE ")+([a-zA-Z])*([0-9a-zA-Z])@(';') )
+	@("create database "|"CREATE DATABASE ")*([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
 		echo "Creating a database..."
 		#parse the user command
 		db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" )
@@ -144,10 +141,10 @@ while true; do
 			dbs_list+=$'\n'$db_name
 			dbs_list=$(echo "$dbs_list" | sort -k1)
 		fi
-		
 		;;
+		
+	@("create table "|"CREATE TABLE ")+([a-zA-Z])?([[:space:]])"("+([a-zA-Z0-9,_[:space:]])")"@(';')*([[:space:]]) )
 
-		@([cC][rR][eE][aA][tT][eE][[:space:]]+[tT][aA][bB][lL][eE]*) )
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
@@ -158,7 +155,7 @@ while true; do
 	@("alter table " | "ALTER TABLE "))
 		;;
 
-	@("show tables"|"SHOW TABLES")?(";") )
+	@("show tables"|"SHOW TABLES")?(";")*([[:space:]]) )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
 		else
@@ -189,6 +186,7 @@ while true; do
 		;;
 
 	*)
+		echo "your input is $user_cmd"
 		echo "invalid syntax."
 		;;
 	esac
