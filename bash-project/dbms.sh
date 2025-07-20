@@ -142,10 +142,37 @@ do_describe_table(){
 }
 #handles drop table command
 do_drop_table(){
-	cmd="$1"
-	if [[ "$cmd" =~ [Dd][Rr][Oo][Pp][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+() ]]; then
-		#statements
+	if [[ -z "$cur_db" ]]; then
+		echo "You must USE a database to drop a table."
+		return
 	fi
+	table_to_drop=""
+	cmd="$1"
+	#get the table name
+	if [[ "$cmd" =~ [Dd][Rr][Oo][Pp][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*";"[[:space:]]* ]]; then
+		table_to_drop="${BASH_REMATCH[1]}"
+	else
+		echo "You must provide a table name."
+		return
+	fi
+	#see if there is a table with that name in the cur_db tables
+	exists=$(echo "$cur_db_tables" | grep ^"$table_to_drop"$)
+	if [[ -z "$exists" ]]; then
+		echo "The table you entered doesn't exist"
+		return
+	fi
+	#remove table from .db and delete its file
+	(rm "$cur_db/$table_to_drop")
+	(sed '/^'"$table_to_drop"'$/d' "$cur_db/.db")
+	#update the variable cur_db_tables
+	#cur_db_tables=$(echo "$cur_db_tables" | awk -v tname="$table_to_drop" '{
+	#	if($0 == tname){
+	#		print tname
+	#	}
+	#}')
+	cur_db_tables=$(ls -l "$cur_db" | grep ^-)
+	cur_db_tables=$(replaceMultipleSpaces "$cur_db_tables" | cut -d' ' -f9)
+	echo "deleted table $table_to_drop"
 }
 
 #handle the select command
