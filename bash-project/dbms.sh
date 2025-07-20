@@ -131,7 +131,7 @@ while true; do
 		
 		;;
 
-	@("create table "|"CREATE TABLE ")+([a-zA-Z])*([0-9a-zA-Z])"("*")"@(';') )
+	@("create table "|"CREATE TABLE ")+([a-zA-Z])?([[:space:]])"("+([a-zA-Z0-9_,[:space:]])")"@(';') )
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
@@ -173,6 +173,7 @@ while true; do
 		;;
 
 	*)
+		echo "your input is: $user_cmd"
 		echo "invalid syntax."
 		;;
 	esac
