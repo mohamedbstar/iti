@@ -81,8 +81,24 @@ do_create_table(){
 readAllDatabases
 
 while true; do
-	
-	read -p "> " user_cmd
+	prompt="> "
+	user_cmd=""
+	while true; do
+		if [[ -n "$user_cmd" ]]; then
+			prompt="--"
+		fi
+    	read -p "$prompt" line
+    	if [[ $line == ^ $'\n'$ ]]; then
+    		continue
+    	fi
+    	user_cmd+="$line"$'\n '
+
+    	[[ "$line" == *";" ]] && break
+	done
+
+	#normalize the input to be all without new lines
+	user_cmd=$(echo "$user_cmd" | tr $'\n' ' ')
+
 	case "$user_cmd" in
 	@("ex"|"EX")* )
 		exit
@@ -131,7 +147,7 @@ while true; do
 		
 		;;
 
-	@("create table " | "CREATE TABLE ")+([a-zA-Z])*([0-9a-zA-Z])@(';') )
+		@([cC][rR][eE][aA][tT][eE][[:space:]]+[tT][aA][bB][lL][eE]*) )
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
