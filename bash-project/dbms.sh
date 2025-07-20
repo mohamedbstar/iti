@@ -74,7 +74,7 @@ do_update(){
 
 do_create_table(){
 	cmd="$1"
-
+	echo "creating table...."
 }
 
 #when starting the program ==> load all database names in the global variable dbs_list
@@ -131,14 +131,14 @@ while true; do
 		
 		;;
 
-	@("create table " | "CREATE TABLE ")+([a-zA-Z])*([0-9a-zA-Z])@(';') )
+	@("create table "|"CREATE TABLE ")+([a-zA-Z])*([0-9a-zA-Z])"("*")"@(';') )
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
 			do_create_table "$user_cmd"
 		fi
 		;;
-		
+
 	@("alter table " | "ALTER TABLE "))
 		;;
 
