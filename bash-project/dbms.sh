@@ -57,10 +57,16 @@ do_create_table(){
 	echo "in do_create_table"
 	table_to_create=""
 	columns=""
+	pk="" #boolean variable to indicate if a pk has been set to this table or not
+	col_names_fo_far=""
 	#first extract the table name before parsing its columns
 	if [[ "$cmd" =~ [Cc][Rr][Ee][Aa][Tt][Ee][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*["("] ]]; then
 		echo "table name is: ${BASH_REMATCH[1]}"
 		table_to_create="${BASH_REMATCH[1]}"
+		if [[ "$table_to_create" =~ ^[0-9] ]]; then
+			echo "Table name can't start with a number"
+			return
+		fi
 	fi
 
 	#search if there is an existing table having that name
@@ -69,27 +75,77 @@ do_create_table(){
 		echo "There is already an existing table with the given name."
 		return
 	fi
-	#create a file in the cur_db directory with that name
-	touch "$cur_db/$table_name"
-
+	
 	#parse columns and data types
 	#
 	#\(([[:space:]]*[a-zA-Z0-9_]+[[:space:]]*(int|string|boolean)[,|[[:space:]]*]?)[[:space:]]*\)[[:space:]]*
 	if [[ "$cmd" =~ [[:space:]]*\(([[:space:]]*[^\)]*[[:space:]]*)[[:space:]]*\) ]]; then
 		columns="${BASH_REMATCH[1]}"
 		echo "columns are: $columns"
+	else
+		echo "You must provide proper column names and types"
+		return
 	fi
 	#+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,[[:space:]]*))
-
+	columns=$(replaceMultipleSpaces "$columns")
+	#trim columns
+	columns=$(echo "$columns" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+	#cut by comma
+	columns=$(echo "$columns" | awk 'BEGIN { RS=","; FS=" " } { print $1":",$2 }' | tr -d ' ')
+	columns+=":" #to be able to check for PK
+	#loop through the columns registering them into .db file
+	#check for conflicting names, improper data types and duplicate PK
+	while read line; do
+		col=$(echo "$line" | cut -d: -f1)
+		dtype=$(echo "$line" | cut -d: -f2)
+		p_k=$(echo "$line" | cut -d: -f3)
+		if [[ -z "$col" || -z "$dtype" ]]; then
+			echo "Field name of data type is missing, you must provide complete field info..."
+			return
+		fi
+		#check for invalid data type
+		if [[ "$dtype" != "int" && "$dtype" != "string" && "$dtype" != "boolean" ]]; then
+			echo "Invalid data type: $dtype"
+			return
+		fi
+		
+		#duplicate col name
+		col_in_cols=$(echo "$col_names_fo_far" | grep ^"$col"$ )
+		if [[ -n "$col_in_cols" ]]; then
+			echo "You must provide unique column names. [$col]"
+			return
+		fi
+		col_names_fo_far+=$'\n'"$col" #append the column name for comparison with upcoming columns
+		#duplicate pk
+		if [[ -n "$p_k" && -n "$pk"  ]]; then
+			echo "You can't provide more than one column as a PK"
+			return
+		fi
+		if [[ -n "$p_k" ]]; then
+			pk="$p_k"
+		fi
+		#write info in the file
+		(echo "$line" >> "$cur_db/.db")
+	done <<< "$columns"
+	#create a file 
+	(touch "$cur_db/$table_to_create")
+	#update cur_db_tables variable
+	cur_db_tables+=$'\n'"$table_to_create"
 }
 #handles alter table command
 do_alter_table(){
 	echo "altering"
 }
-
+#handles describe table command
+do_describe_table(){
+	echo "describing table"
+}
 #handles drop table command
 do_drop_table(){
-	echo "dropping"
+	cmd="$1"
+	if [[ "$cmd" =~ [Dd][Rr][Oo][Pp][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+() ]]; then
+		#statements
+	fi
 }
 
 #handle the select command
@@ -144,8 +200,6 @@ do_update(){
 	echo ""
 }
 
-
-
 #when starting the program ==> load all database names in the global variable dbs_list
 readAllDatabases
 
@@ -195,8 +249,8 @@ while true; do
 			echo "The database you entered doesn't exist."
 		fi
 		;;
-
-	@("create database "|"CREATE DATABASE ")*([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	#([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
+	@("create database "|"CREATE DATABASE ")* )
 		echo "Creating a database..."
 		#parse the user command
 		db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" )
@@ -214,31 +268,36 @@ while true; do
 			dbs_list=$(echo "$dbs_list" | sort -k1)
 		fi
 		;;
-	@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	#@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	@("drop database "|"DROP DATABASE ")* )	
 		echo "Dropping database..."
 		;;
 	#+([a-zA-Z0-9,_[:space:]])
-	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(["("])*([[:space:]])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,|[[:space:]]*))@([")"])*([[:space:]])@(';')*([[:space:]]) )
+	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(["("])*([[:space:]])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,|[[:space:]]*))@([")"])*([[:space:]])@(';')*([[:space:]]) )
 	#@([cC][rR][eE][aA][tT][eE]+[[:space:]][tT][aA][bB][lL][eE]+[[:space:]]\
 	#+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*\(\
 	#+([a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+(int|string|boolean)[[:space:]]*(,[[:space:]]*)?)+\
 	#\)[[:space:]]*;) )
 	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z]_)*([a-zA-Z0-9_-])*([[:space:]])@(["("]) )	
+	@("create table "|"CREATE TABLE ")* )	
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
 			do_create_table "$user_cmd"
 		fi
 		;;
-		
-	@("alter table "|"ALTER TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	#([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
+	@("alter table "|"ALTER TABLE ")* )
 		do_alter_table "$user_cmd"
 		;;
-
-	@("drop table "|"DROP TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	@("describe table "|"DESCRIBE TABLE ")* )
+		do_describe_table "$user_cmd"
+		;;
+	#([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
+	@("drop table "|"DROP TABLE ")* )
 		do_drop_table "$user_cmd"
 		;;
-	@("show tables"|"SHOW TABLES")?(";")*([[:space:]]) )
+	@("show tables"|"SHOW TABLES")*([[:space:]])?(";")*([[:space:]]) )
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
 		else
