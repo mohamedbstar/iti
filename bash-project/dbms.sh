@@ -73,7 +73,9 @@ do_create_table(){
 	touch "$cur_db/$table_name"
 
 	#parse columns and data types
-	if [[ "$cmd" =~ ["("]()[")"] ]]; then
+	#
+	#\(([[:space:]]*[a-zA-Z0-9_]+[[:space:]]*(int|string|boolean)[,|[[:space:]]*]?)[[:space:]]*\)[[:space:]]*
+	if [[ "$cmd" =~ [[:space:]]*\(([[:space:]]*[^\)]*[[:space:]]*)[[:space:]]*\) ]]; then
 		columns="${BASH_REMATCH[1]}"
 		echo "columns are: $columns"
 	fi
@@ -216,8 +218,12 @@ while true; do
 		echo "Dropping database..."
 		;;
 	#+([a-zA-Z0-9,_[:space:]])
-	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])+([a-zA-Z0-9_-])*([[:space:]])@(["("])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,[[:space:]]*))@([")"])@(';')*([[:space:]]) )
-
+	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(["("])*([[:space:]])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,|[[:space:]]*))@([")"])*([[:space:]])@(';')*([[:space:]]) )
+	#@([cC][rR][eE][aA][tT][eE]+[[:space:]][tT][aA][bB][lL][eE]+[[:space:]]\
+	#+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*\(\
+	#+([a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+(int|string|boolean)[[:space:]]*(,[[:space:]]*)?)+\
+	#\)[[:space:]]*;) )
+	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z]_)*([a-zA-Z0-9_-])*([[:space:]])@(["("]) )	
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
 		else
