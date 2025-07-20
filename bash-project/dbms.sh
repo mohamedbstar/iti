@@ -10,7 +10,6 @@ dbs_list=""
 cur_db_tables=""
 
 
-
 #=================================== UTILITY FUNCTIONS ==============================
 
 replaceMultipleSpaces(){
@@ -47,7 +46,40 @@ readAllDatabases(){
 	db_list=$(replaceMultipleSpaces "$db_list" | cut -d' ' -f9)
 	dbs_list="$db_list"
 }
+loadTablesIntoCurDb(){
+	all_tables=$(ls -l "$cur_db" | grep "^-") #choose files only and exclude possible directories
+	all_tables=$(replaceMultipleSpaces "$all_tables" | cut -d ' ' -f9)
+	cur_db_tables="$all_tables"
+}
+#handles create table command
+do_create_table(){
+	cmd="$1"
+	echo "in do_create_table"
+	table_to_create=""
+	columns=""
+	#first extract the table name before parsing its columns
+	if [[ "$cmd" =~ [Cc][Rr][Ee][Aa][Tt][Ee][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*["("] ]]; then
+		echo "table name is: ${BASH_REMATCH[1]}"
+		table_to_create="${BASH_REMATCH[1]}"
+	fi
 
+	#search if there is an existing table having that name
+	table_exists=$(echo "$cur_db_tables" | grep ^"$table_to_create"$)
+	if [[ -n "$table_exists" ]]; then
+		echo "There is already an existing table with the given name."
+		return
+	fi
+	#create a file in the cur_db directory with that name
+	touch "$cur_db/$table_name"
+
+	#parse columns and data types
+	if [[ "$cmd" =~ ["("]()[")"] ]]; then
+		columns="${BASH_REMATCH[1]}"
+		echo "columns are: $columns"
+	fi
+	#+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,[[:space:]]*))
+
+}
 #handles alter table command
 do_alter_table(){
 	echo "altering"
@@ -110,10 +142,7 @@ do_update(){
 	echo ""
 }
 
-do_create_table(){
-	cmd="$1"
 
-}
 
 #when starting the program ==> load all database names in the global variable dbs_list
 readAllDatabases
@@ -157,6 +186,7 @@ while true; do
 			#the database exists
 			cur_db=$input_db
 			#load the tables inside cur_db into cur_db_tables
+			loadTablesIntoCurDb
 			echo "You are now operating on database:" $cur_db
 		else
 			#database doesn't exist
@@ -182,11 +212,11 @@ while true; do
 			dbs_list=$(echo "$dbs_list" | sort -k1)
 		fi
 		;;
-	@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
+	@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
 		echo "Dropping database..."
 		;;
-
-	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])"("+([a-zA-Z0-9,_[:space:]])")"@(';')*([[:space:]]) )
+	#+([a-zA-Z0-9,_[:space:]])
+	@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])+([a-zA-Z0-9_-])*([[:space:]])@(["("])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,[[:space:]]*))@([")"])@(';')*([[:space:]]) )
 
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
@@ -206,9 +236,7 @@ while true; do
 		if [[ -z $cur_db ]]; then
 			echo  "You must select a database first. type 'use <db_name> to select a database."
 		else
-			cur_db_tables_list=$(ls -l "$cur_db/" | grep ^-)
-			cur_db_tables_list=$(replaceMultipleSpaces "$cur_db_tables_list" | cut -d' ' -f9)
-			echo "$cur_db_tables_list"
+			echo "$cur_db_tables"
 		fi
 		;;
 
