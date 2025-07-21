@@ -67,6 +67,10 @@ do_create_table(){
 			echo "Table name can't start with a number"
 			return
 		fi
+		if [[ -z $table_to_create ]]; then
+			echo "You must provide a table name"
+			return
+		fi
 	fi
 
 	#search if there is an existing table having that name
@@ -387,11 +391,13 @@ do_insert(){
 	#Primary key check
 	#if there is a field that is a primary key, check the consistency
 	pk_row=$(cat "$cur_db/.$table_to_insert" | grep :[Pp][Kk]$)
+	echo "pk_row is $pk_row"
 	pk_field="" 
 	if [[ -n "$pk_row" ]]; then
 		#there is a primary key constraint ==> get the field that is primary key and check
-		pk_field=$(echo "$pk_column" | cut -d: -f1) #holds the name of the pk field in the table
+		pk_field=$(echo "$pk_row" | cut -d: -f1) #holds the name of the pk field in the table
 	fi
+	echo "pk_field is $pk_field"
 
 	if [[ "$number_of_fields" -gt 0 && -n "$pk_field" ]]; then
 		#check that primary key value is provided
@@ -407,13 +413,25 @@ do_insert(){
 			return
 		fi
 	fi
-	if [[ "$number_of_fields" -eq 0 && -n "$pk_field" ]]; then
+	#check primary key uniqeness when giving specific fields 
+	#if [[ "$number_of_fields" -gt 0 && -n "$pk_field" ]]; then
+
+	#fi
+	#check for uniquenesss of PK
+	if [[ -n "$pk_field" ]]; then #"$number_of_fields" -eq 0 &&
+		echo '"$number_of_fields" -eq 0 && -n "$pk_field"'
 		#value for the primary key field must exist in the ith location in fields array corresponding to the ith position of primary key field in the tble
-		pk_field_pos=$(cat -n "$cur_db/.$table_to_insert")
-		pk_field_pos=$(replaceMultipleSpaces "$pk_field_pos" | grep "$pk_field" | cut -d' ' -f1)
+		#pk_field_pos=$(cat "$cur_db/.$table_to_insert")
+		#pk_field_pos=$(replaceMultipleSpaces "$pk_field_pos" | grep -n "$pk_field"| tr -d ' ' | cut -d':' -f1)
+		pk_field_pos=$(replaceMultipleSpaces "$(cat "$cur_db/.$table_to_insert")" | grep -n "^$pk_field" | cut -d':' -f1)
+		echo "pk_field_pos= $pk_field_pos"
+		pk_field_pos=$(( $pk_field_pos - 1 ))
 		pk_value="${values_array[$pk_field_pos]}" #the value that will be stored in the pk field
 		#check for duplicates
-		duplicate=$(cat "$cur_db/$table_to_insert" | cut -d: -f$pk_field_pos | grep :$pk_value:)
+		echo "pk_value= $pk_value"
+		pk_field_pos=$(( $pk_field_pos + 1 )) #to be eligible for cut command as it starts from 1
+		duplicate=$(cat "$cur_db/$table_to_insert" | cut -d':' -f"$pk_field_pos")
+		duplicate=$(echo "$duplicate" |  grep -E ":?$pk_value:?")
 		if [[ -n "$duplicate" ]]; then
 			echo "PK constraint violation for value [$pk_value]"
 			return
@@ -425,11 +443,12 @@ do_insert(){
 	if (( $number_of_fields > 0 )); then
 		#get all provided fields positions
 		for (( i = 0; i < $number_of_fields; i++ )); do
-			fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -n "${fields_array[$i]}")
+			fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -n "${fields_array[$i]}" | head -1)
 			echo "first fi_pos= $fi_pos"
 			fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d':' -f1)
 			echo "fi_pos= $fi_pos has value ${values_array[$i]}" #prints correctly
-			fields_positions[(($fi_pos-1))]="${values_array[$i]}"
+			fi_pos=$(( $fi_pos - 1 ))
+			fields_positions[$fi_pos]="${values_array[$i]}"
 		done
 		for (( i = 0; i < $number_of_table_fields; i++ )); do #for (( i = 0; i < $number_of_table_fields; i++ )); do
 			field_i="${fields_positions[$i]}"
