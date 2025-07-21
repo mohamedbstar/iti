@@ -393,6 +393,7 @@ do_insert(){
 	pk_row=$(cat "$cur_db/.$table_to_insert" | grep :[Pp][Kk]$)
 	echo "pk_row is $pk_row"
 	pk_field="" 
+	declare -i pk_field_pos_in_input=0
 	if [[ -n "$pk_row" ]]; then
 		#there is a primary key constraint ==> get the field that is primary key and check
 		pk_field=$(echo "$pk_row" | cut -d: -f1) #holds the name of the pk field in the table
@@ -405,6 +406,7 @@ do_insert(){
 		for((i=0;i<$number_of_fields;i++)); do
 			if [[ "$pk_field" == "${fields_array[$i]}" ]]; then
 				exists="${fields_array[$i]}"
+				pk_field_pos_in_input=$i
 				break
 			fi
 		done
@@ -426,7 +428,14 @@ do_insert(){
 		pk_field_pos=$(replaceMultipleSpaces "$(cat "$cur_db/.$table_to_insert")" | grep -n "^$pk_field" | cut -d':' -f1)
 		echo "pk_field_pos= $pk_field_pos"
 		pk_field_pos=$(( $pk_field_pos - 1 ))
-		pk_value="${values_array[$pk_field_pos]}" #the value that will be stored in the pk field
+		
+		#pk_field_pos_in_input=$(( $pk_field_pos_in_input - 1 ))
+		#change this as the index should be the position of pk_field_pos_in_input not in the table
+		echo "pk_field_pos_in_input= $pk_field_pos_in_input"
+		pk_value="${values_array[$pk_field_pos_in_input]}" #the value that will be stored in the pk field
+		
+
+
 		#check for duplicates
 		echo "pk_value= $pk_value"
 		pk_field_pos=$(( $pk_field_pos + 1 )) #to be eligible for cut command as it starts from 1
@@ -443,9 +452,9 @@ do_insert(){
 	if (( $number_of_fields > 0 )); then
 		#get all provided fields positions
 		for (( i = 0; i < $number_of_fields; i++ )); do
-			fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -n "${fields_array[$i]}" | head -1)
-			echo "first fi_pos= $fi_pos"
-			fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d':' -f1)
+			declare -i fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -nE "^${fields_array[$i]}:"  | cut -d':' -f1)
+			#echo "first fi_pos= $fi_pos"
+			#fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d':' -f1)
 			echo "fi_pos= $fi_pos has value ${values_array[$i]}" #prints correctly
 			fi_pos=$(( $fi_pos - 1 ))
 			fields_positions[$fi_pos]="${values_array[$i]}"
@@ -454,7 +463,9 @@ do_insert(){
 			field_i="${fields_positions[$i]}"
 			if [[ -z "$field_i" ]]; then
 				echo "appending :"
-				output+=":"
+				if [[ $i -lt $(( $number_of_fields - 1 )) ]]; then
+					output+=":"
+				fi
 			else
 				output+="${fields_positions[$i]}:"
 			fi
@@ -470,6 +481,7 @@ do_insert(){
 	fi
 	#store output into table
 	echo "values array is: ${values_array[@]}"
+	echo "fields array is: ${fields_array[@]}"
 	echo "output is $output"
 	(echo "$output" >> "$cur_db/$table_to_insert")
 	echo "inserted values successfully"
