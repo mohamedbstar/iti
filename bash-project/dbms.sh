@@ -310,13 +310,14 @@ do_insert(){
 	#get values to insert
 	if [[ "$cmd" =~ [Vv][Aa][Ll][Uu][Ee][Ss][[:space:]]*([^\)]+) ]]; then
 		values_to_insert="${BASH_REMATCH[1]}"
+		echo "values_to_insert: $values_to_insert"
 		values_to_insert=$(echo "$values_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/,$//' | tr -d ')' | tr -d  '(')
-		values_to_insert=$(echo "$values_to_insert" | awk 'BEGIN { FS=":" } {
+		values_to_insert=$(echo "$values_to_insert" | awk 'BEGIN { FS="," } { 
 		 for(i=1;i<=NF;i++){
 		 	print $i
 		 }
-		}' |tr -d ' ' | tr $'\n' ':' | sed 's/:$//' )
-		number_of_values=$(echo "$values_to_insert" | awk 'BEGIN{FS=","} {print NF}')
+		}'  |tr -d ' ' | tr $'\n' ':' | sed 's/:$//' )
+		number_of_values=$(echo "$values_to_insert" | awk 'BEGIN{FS=":"} {print NF}')
 		if [[ $number_of_values -eq 0 ]]; then
 			#as it could match () and don't go to else condition
 			echo "You must provide values to insert into the table"
@@ -327,6 +328,9 @@ do_insert(){
 		echo "You must provide values to insert into the table"
 		return
 	fi
+	#store the values to insert in  an array
+	IFS=":" read -ra fields_array <<< $fields_to_insert
+	IFS=":" read -ra values_array <<< $values_to_insert
 	#check equal number of values and fields if exist
 	if [[ $number_of_fields -gt 0 ]]; then
 		#check if number of fields not greater than number of fields in the table
@@ -341,14 +345,14 @@ do_insert(){
 			return
 		fi
 		#check matching data types for provided values and fields => get every data type for each field and compare it with value
-		IFS=":" read -ra fields_array <<< $fields_to_insert
-		IFS=":" read -ra values_array <<< $values_to_insert
+		
 		#check that all provided fields exist int the table
 		#read -ra table_fields_array <<< $table_fields
 		for ((i=0; i<$number_of_fields; i++)); do
 			exists=$(echo "$table_fields" | grep ^"${fields_array[$i]}"$)
 			if [[ "$exists" == "" ]]; then
 				echo "field [${fields_array[$i]}] doesn't exist in the table"
+				return
 			fi
 		done
 		for((i=0; i<number_of_fields;i++)); do
@@ -419,29 +423,35 @@ do_insert(){
 	output=""
 	fields_positions=() #associative array to hold [position:field]
 	if (( $number_of_fields > 0 )); then
-		#rearrange fields positions with regard to .table file
+		#get all provided fields positions
 		for (( i = 0; i < $number_of_fields; i++ )); do
-			fi_pos=$(cat -n "$cur_db/.$table_to_insert" | grep "${fields_array[$i]}")
-			fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d' ' -f1)
-			fields_positions[$fi_pos]="${fields_array[$i]}"
+			fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -n "${fields_array[$i]}")
+			echo "first fi_pos= $fi_pos"
+			fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d':' -f1)
+			echo "fi_pos= $fi_pos has value ${values_array[$i]}" #prints correctly
+			fields_positions[(($fi_pos-1))]="${values_array[$i]}"
 		done
-		for (( i = 0; i < $number_of_table_fields; i++ )); do
+		for (( i = 0; i < $number_of_table_fields; i++ )); do #for (( i = 0; i < $number_of_table_fields; i++ )); do
 			field_i="${fields_positions[$i]}"
 			if [[ -z "$field_i" ]]; then
-				[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+=":"
+				echo "appending :"
+				output+=":"
 			else
-				[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}:"
-				[[ "$i" -eq $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}"
+				output+="${fields_positions[$i]}:"
 			fi
 		done
 	else
 		#store them as provided after checking their data type
 		for (( i = 0; i < $number_of_table_fields; i++ )); do
-			[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}:"
-			[[ "$i" -eq $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}"
+			output+="${values_array[$i]}"
+    		if [[ $i -lt $(( number_of_table_fields - 1 )) ]]; then
+        		output+=":"
+    		fi
 		done
 	fi
 	#store output into table
+	echo "values array is: ${values_array[@]}"
+	echo "output is $output"
 	(echo "$output" >> "$cur_db/$table_to_insert")
 	echo "inserted values successfully"
 }
