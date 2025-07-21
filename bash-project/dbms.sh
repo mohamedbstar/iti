@@ -51,6 +51,10 @@ loadTablesIntoCurDb(){
 	all_tables=$(replaceMultipleSpaces "$all_tables" | cut -d ' ' -f9)
 	cur_db_tables="$all_tables"
 }
+#handles drop database command
+do_drop_database(){
+	echo ""
+}
 #handles create table command
 do_create_table(){
 	cmd="$1"
@@ -238,10 +242,19 @@ do_select(){
 	all_table_fields=$(echo "$all_table_fields" | sed -e 's/^[[:space:]\t]*//' -e 's/[[:space:]\t]*$//' | tr ' ' ':')
 	all_table_fields=$(replaceMultipleSpaces "$all_table_fields")
 	echo "all_table_fields are: $all_table_fields"
-	IFS=$':' read -a selected_columns_array <<< "$selected_columns"
-	declare -i number_of_selected_columns=${#selected_columns_array}  #$(awk 'BEGIN{FS=":"}{print NF}')
-	number_of_table_fields=$(cat "$cur_db/$table_to_select" | wc -l)
 	
+	declare -i number_of_selected_columns=$(echo "$selected_columns" | awk 'BEGIN{FS=":"}{print NF}')
+	
+	if [[ $number_of_selected_columns -gt 1 ]]; then
+		IFS=$':' read -a selected_columns_array <<< "$selected_columns"
+	else
+		selected_columns_array=($selected_columns)
+	fi
+	
+
+	echo "selected columns are: ${selected_columns_array[@]}"
+	number_of_table_fields=$(cat "$cur_db/.$table_to_select" | wc -l)
+	echo "number_of_selected_columns: $number_of_selected_columns"
 	if [[ "$selected_columns" == "*" ]]; then
 		IFS=$'\n'
 		while read record; do
@@ -250,14 +263,17 @@ do_select(){
 	else
 		#get selected columns positions
 		for((i=0; i < $number_of_selected_columns; i++)); do
-			pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[$i]}" | cut -d: -f1)
-			if [[ -z $pos ]]; then
+			declare -i pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[$i]}" | cut -d: -f1)
+			pos_string=$(echo "$all_table_fields" | grep "${selected_columns_array[$i]}" | cut -d: -f1)
+			if [[ -z $pos_string ]]; then
 				echo "Invalid field [${selected_columns_array[$i]}]"
 				return
 			fi
 			echo "pos is $pos"
+			#pos=$(( $pos - 1 ))
 			selected_columns_positions+=($pos)
 		done
+		echo "selected columns positions are: ${selected_columns_positions[@]}"
 		#cat with cut for these positions
 		to_cut=$(echo "${selected_columns_positions[@]}" | tr ' ' ',')
 		(cat "$cur_db/$table_to_select" | cut -d: -f"$to_cut")
@@ -568,6 +584,7 @@ while true; do
 	#@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
 	@("drop database "|"DROP DATABASE ")* )	
 		echo "Dropping database..."
+		do_drop_database $user_cmd
 		;;
 	#+([a-zA-Z0-9,_[:space:]])
 	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(["("])*([[:space:]])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,|[[:space:]]*))@([")"])*([[:space:]])@(';')*([[:space:]]) )
