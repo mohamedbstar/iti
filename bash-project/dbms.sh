@@ -246,7 +246,11 @@ do_select(){
 	else
 		#get selected columns positions
 		for((i=0; i < $number_of_selected_columns; i++)); do
-			pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[i]}" | cut -d: -f1)
+			pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[$i]}" | cut -d: -f1)
+			if [[ -z $pos ]]; then
+				echo "Invalid field [${selected_columns_array[$i]}]"
+				return
+			fi
 			echo "pos is $pos"
 			selected_columns_positions+=($pos)
 		done
