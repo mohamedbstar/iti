@@ -91,10 +91,11 @@ do_create_table(){
 	#trim columns
 	columns=$(echo "$columns" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 	#cut by comma
-	columns=$(echo "$columns" | awk 'BEGIN { RS=","; FS=" " } { print $1":",$2 }' | tr -d ' ')
+	columns=$(echo "$columns" | awk 'BEGIN { RS=","; FS=" " } { print $1":",$2":",$3}' | tr -d ' ')
 	columns+=":" #to be able to check for PK
 	#loop through the columns registering them into .db file
 	#check for conflicting names, improper data types and duplicate PK
+	echo "columns is: $columns"
 	while read line; do
 		col=$(echo "$line" | cut -d: -f1)
 		dtype=$(echo "$line" | cut -d: -f2)
@@ -175,11 +176,13 @@ do_drop_table(){
 	#}')
 	cur_db_tables=$(ls -l "$cur_db" | grep ^-)
 	cur_db_tables=$(replaceMultipleSpaces "$cur_db_tables" | cut -d' ' -f9)
+	echo "current tables are: $cur_db_tables"
 	echo "deleted table $table_to_drop"
 }
 
 #handle the select command
 do_select(){
+	table_to_select=""
 	#check if there is a current database selected or not
 	if [[ -z "$cur_db" ]]; then
 		echo "You must USE a database to begin selecting."
@@ -196,22 +199,62 @@ do_select(){
 		echo "You must provide at least one column to select."
 		return
 	fi
-	selected_columns=$(echo "$selected_columns" | tr -d ' ')
+	selected_columns=$(echo "$selected_columns" | tr -d ' '|tr ',' ':')
+
 	echo "selected columns are: $selected_columns"
 	#then extract the table name to select from
-	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]([a-zA-Z][a-zA-Z0-9_-]+[[:space:]]*;[[:space:]]*) ]]; then
+	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]([a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*[;][[:space:]]*) ]]; then
 		#statements
 		table_name="${BASH_REMATCH[1]}"
 		#trim the table name
 		table_name=$(echo "$table_name" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 		table_name=$(echo "$table_name" | sed 's/;$//')
 		echo "trimmed table name: $table_name"
+		table_to_select="$table_name"
 	else
 		echo "You must provide a table name."
 		return
 	fi
 
 	#check if there is a table by this name in the cur_db or not
+	table_exists=$(echo "$cur_db_tables" | grep ^"$table_to_select"$)
+	if [[ -z "$table_exists" ]]; then
+		echo "The provided table doesn't exist"
+		return
+	fi
+
+	#TODO: check if there is a where condition
+
+
+	#select the provided columns
+	output=""
+	selected_columns_positions=()
+	all_table_fields=$(cat "$cur_db/.$table_to_select")
+	echo "all_table_fields are: $all_table_fields"
+	all_table_fields=$(echo "$all_table_fields" | sed -e 's/^[[:space:]\t]*//' -e 's/[[:space:]\t]*$//' | tr ' ' ':')
+	all_table_fields=$(replaceMultipleSpaces "$all_table_fields")
+	echo "all_table_fields are: $all_table_fields"
+	IFS=$':' read -a selected_columns_array <<< "$selected_columns"
+	declare -i number_of_selected_columns=${#selected_columns_array}  #$(awk 'BEGIN{FS=":"}{print NF}')
+	number_of_table_fields=$(cat "$cur_db/$table_to_select" | wc -l)
+	
+	if [[ "$selected_columns" == "*" ]]; then
+		IFS=$'\n'
+		while read record; do
+			printf "%s\n" "$record"
+		done < "$cur_db/$table_to_select"
+	else
+		#get selected columns positions
+		for((i=0; i < $number_of_selected_columns; i++)); do
+			pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[i]}" | cut -d: -f1)
+			echo "pos is $pos"
+			selected_columns_positions+=($pos)
+		done
+		#cat with cut for these positions
+		to_cut=$(echo "${selected_columns_positions[@]}" | tr ' ' ',')
+		(cat "$cur_db/$table_to_select" | cut -d: -f"$to_cut")
+	fi
+
 }
 
 #handle the insert command
@@ -333,10 +376,70 @@ do_insert(){
 			return
 		fi
 	fi
-	
-	
+	#Primary key check
 	#if there is a field that is a primary key, check the consistency
+	pk_row=$(cat "$cur_db/.$table_to_insert" | grep :[Pp][Kk]$)
+	pk_field="" 
+	if [[ -n "$pk_row" ]]; then
+		#there is a primary key constraint ==> get the field that is primary key and check
+		pk_field=$(echo "$pk_column" | cut -d: -f1) #holds the name of the pk field in the table
+	fi
 
+	if [[ "$number_of_fields" -gt 0 && -n "$pk_field" ]]; then
+		#check that primary key value is provided
+		exists=""
+		for((i=0;i<$number_of_fields;i++)); do
+			if [[ "$pk_field" == "${fields_array[$i]}" ]]; then
+				exists="${fields_array[$i]}"
+				break
+			fi
+		done
+		if [[ -z "$exists" ]]; then
+			echo "You must provide primary key in the fields list"
+			return
+		fi
+	fi
+	if [[ "$number_of_fields" -eq 0 && -n "$pk_field" ]]; then
+		#value for the primary key field must exist in the ith location in fields array corresponding to the ith position of primary key field in the tble
+		pk_field_pos=$(cat -n "$cur_db/.$table_to_insert")
+		pk_field_pos=$(replaceMultipleSpaces "$pk_field_pos" | grep "$pk_field" | cut -d' ' -f1)
+		pk_value="${values_array[$pk_field_pos]}" #the value that will be stored in the pk field
+		#check for duplicates
+		duplicate=$(cat "$cur_db/$table_to_insert" | cut -d: -f$pk_field_pos | grep :$pk_value:)
+		if [[ -n "$duplicate" ]]; then
+			echo "PK constraint violation for value [$pk_value]"
+			return
+		fi
+	fi
+	#store values in the table
+	output=""
+	fields_positions=() #associative array to hold [position:field]
+	if (( $number_of_fields > 0 )); then
+		#rearrange fields positions with regard to .table file
+		for (( i = 0; i < $number_of_fields; i++ )); do
+			fi_pos=$(cat -n "$cur_db/.$table_to_insert" | grep "${fields_array[$i]}")
+			fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d' ' -f1)
+			fields_positions[$fi_pos]="${fields_array[$i]}"
+		done
+		for (( i = 0; i < $number_of_table_fields; i++ )); do
+			field_i="${fields_positions[$i]}"
+			if [[ -z "$field_i" ]]; then
+				[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+=":"
+			else
+				[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}:"
+				[[ "$i" -eq $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}"
+			fi
+		done
+	else
+		#store them as provided after checking their data type
+		for (( i = 0; i < $number_of_table_fields; i++ )); do
+			[[ "$i" -ne $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}:"
+			[[ "$i" -eq $(( $number_of_fields - 1 )) ]] && output+="${fields_positions[$i]}"
+		done
+	fi
+	#store output into table
+	(echo "$output" >> "$cur_db/$table_to_insert")
+	echo "inserted values successfully"
 }
 
 #handle the delete command
@@ -354,11 +457,11 @@ readAllDatabases
 
 #program main loop
 while true; do
-	prompt="> "
+	prompt="-> "
 	user_cmd=""
 	while true; do
 		if [[ -n "$user_cmd" ]]; then
-			prompt="--"
+			prompt="---"
 		fi
     	read -p "$prompt" line
     	user_cmd+="$line"$'\n'
