@@ -225,6 +225,13 @@ do_insert(){
 	cmd="$1"
 	fields_to_insert=""
 	values_to_insert=""
+	table_fields=""
+	table_fields_types=""
+	table_exists=""
+	declare -i number_of_fields=0
+	declare -i number_of_values=0
+	declare -i number_of_table_fields=0
+	
 	#get table name
 	if [[ $cmd =~ [Ii][Nn][Ss][Ee][Rr][Tt][[:space:]]+[Ii][Nn][Tt][Oo][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*[(]?[[:space:]a-zA-Z0-9_,-]*[)]?[[:space:]]*[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
 		table_to_insert="${BASH_REMATCH[1]}"
@@ -233,24 +240,101 @@ do_insert(){
 		echo "Invalid table name."
 		return
 	fi
+	#check the table name exists in cur_db
+	table_exists=$(cat "$cur_db/.db" | grep ^"$table_to_insert"$)
+	if [[ $table_exists == "" ]]; then
+		echo "Table doesn't exist."
+		return
+	fi
+	table_fields=$(cat "$cur_db/.$table_to_insert" | cut -d: -f1)
+	table_fields_types=$(cat "$cur_db/.$table_to_insert" | cut -d: -f2)
+	number_of_table_fields=$(cat "$cur_db/.$table_to_insert" | wc -l)
+	(cat "$cur_db/.$table_to_insert")
+	echo "number of table fields: $number_of_table_fields"
 	#get fields if existing
 	if [[ "$cmd" =~  [Ii][Nn][Tt][Oo][[:space:]]+[a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*([\(][[:space:]a-zA-Z0-9_,-]*[\)][[:space:]]*)[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
 		fields_to_insert="${BASH_REMATCH[1]}"
 		#trim these fields
-		fields_to_insert=$(echo "$fields_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-		fields_to_insert=$(echo "$fields_to_insert" | awk 'BEGIN { FS="," } { print $1":",$2 }' | tr -d ' ' | tr -d ')' | tr -d  '(')
+		fields_to_insert=$(echo "$fields_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/,$//' )
+		fields_to_insert=$(echo "$fields_to_insert" | awk 'BEGIN { FS="," } { print $1":",$2 }' | tr -d ' ' | tr -d ')' | tr -d  '(' | sed 's/:$//')
+		number_of_fields=$(echo "$fields_to_insert" | awk 'BEGIN{FS=":"} {print NF}')
+		echo "fields to insert: $fields_to_insert and they are $number_of_fields"
 	fi
 	#get values to insert
 	if [[ "$cmd" =~ [Vv][Aa][Ll][Uu][Ee][Ss][[:space:]]*([^\)]+) ]]; then
-		values_to_insert="values are: ${BASH_REMATCH[1]}"
+		values_to_insert="${BASH_REMATCH[1]}"
+		values_to_insert=$(echo "$values_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/,$//' | tr -d ')' | tr -d  '(')
+		values_to_insert=$(echo "$values_to_insert" | awk 'BEGIN { FS=":" } {
+		 for(i=1;i<=NF;i++){
+		 	print $i
+		 }
+		}' |tr -d ' ' | tr $'\n' ':' | sed 's/:$//' )
+		number_of_values=$(echo "$values_to_insert" | awk 'BEGIN{FS=","} {print NF}')
+		if [[ $number_of_values -eq 0 ]]; then
+			#as it could match () and don't go to else condition
+			echo "You must provide values to insert into the table"
+			return
+		fi
+		echo "values to insert: $values_to_insert and they are $number_of_values"
 	else
 		echo "You must provide values to insert into the table"
 		return
 	fi
 	#check equal number of values and fields if exist
-	#if not check values are equal to table fields in type and number
-	#check the table name exists in cur_db
-	#check fields exist in the table
+	if [[ $number_of_fields -gt 0 ]]; then
+		#check if number of fields not greater than number of fields in the table
+		if [[ $number_of_fields -gt $number_of_table_fields ]]; then
+			echo "You must provide number of fields not greater than number of fields in the table."
+			return
+		fi
+		
+		#check equal number of provided fields and values
+		if [[ $number_of_fields -ne $number_of_values ]]; then
+			echo "Unequal number of fields and values."
+			return
+		fi
+		#check matching data types for provided values and fields => get every data type for each field and compare it with value
+		IFS=":" read -ra fields_array <<< $fields_to_insert
+		IFS=":" read -ra values_array <<< $values_to_insert
+		#check that all provided fields exist int the table
+		#read -ra table_fields_array <<< $table_fields
+		for ((i=0; i<$number_of_fields; i++)); do
+			exists=$(echo "$table_fields" | grep ^"${fields_array[$i]}"$)
+			if [[ "$exists" == "" ]]; then
+				echo "field [${fields_array[$i]}] doesn't exist in the table"
+			fi
+		done
+		for((i=0; i<number_of_fields;i++)); do
+			#get the field $i
+			field_i="${fields_array[$i]}"
+			value_i="${values_array[$i]}"
+			field_i_type=$(grep field_i "$cur_db/.$table_to_insert" | cut -d: -f2)
+			if [[ $field_i_type == "int" ]]; then
+				if [[ ! $value_i =~ ^[0-9]+$ ]]; then
+					echo "$value_i is not of type $field_i_type"
+				fi
+			fi
+			if [[ $field_i_type == "string" ]]; then
+				if [[ ! $value_i =~ ^[[a-zA-Z0-9_[[:space:]]-]+$ ]]; then
+					echo "$value_i is not of type $field_i_type"
+				fi
+			fi
+			if [[ $field_i_type == "boolean" ]]; then
+				if [[ ! $value_i =~ ^[01]$ ]]; then
+					echo "$value_i is not of type $field_i_type"
+				fi
+			fi
+		done
+	else
+		#if not providing fields ==> check values are equal to table fields in type and number
+		
+		if [[ $number_of_table_fields -ne $number_of_values ]]; then
+			echo "You must provide a number values that matches number of table fields"
+			return
+		fi
+	fi
+	
+	
 	#if there is a field that is a primary key, check the consistency
 
 }
