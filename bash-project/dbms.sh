@@ -149,7 +149,26 @@ do_alter_table(){
 }
 #handles describe table command
 do_describe_table(){
-	echo "describing table"
+	if [[ -z "$cur_db" ]]; then
+		echo "You must select a database first."
+		return
+	fi
+	cmd="$1"
+	table_name=""
+	if [[ "$cmd" =~ [Dd][Ee][Ss][Cc][Rr][Ii][Bb][Ee][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*)";" ]]; then
+		table_name="${BASH_REMATCH[1]}"
+		table_name=$(echo "$table_name" | tr -d ' ')
+	else
+		echo "You must select a table to describe"
+		return
+	fi
+	#check if table exists in the database
+	exists=$(cat "$cur_db/.db" | grep ^"$table_name"$)
+	if [[ -z "$exists" ]]; then
+		echo "Table [$table_name] doesn't exist"
+		return
+	fi
+	(cat "$cur_db/.$table_name")
 }
 #handles drop table command
 do_drop_table(){
@@ -552,9 +571,94 @@ do_insert(){
 	echo "inserted values successfully"
 }
 
-#handle the delete command
+#handle the delete command to delete records from tables
 do_delete(){
-	echo ""
+	if [[ -z "$cur_db" ]]; then
+		echo "You must select a database first"
+		return
+	fi
+	cmd="$1"
+	table_name=""
+	where="" #holds where clause
+	where_field="" #holds where clause field
+	where_value="" #holds where clause value
+	where_field_pos="" #holds where field position in table
+	#extract table name
+	if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*";" || "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]*([a-zA-Z_][a-zA-Z0-9_[:space:]-]*)[[:space:]]+[Ww][Hh][Ee][Rr][Ee][[:space:]]*.*";"[[:space:]]* ]]; then
+		table_name="${BASH_REMATCH[1]}"
+		table_name=$(echo "$table_name" | tr -d ' ')
+		echo "deleting from table [$table_name]"
+	else
+		echo "You must provide a table name to delete from"
+		return
+	fi
+	#check if table exists or not
+	exists=$(cat "$cur_db/.db" | grep ^"$table_name"$)
+	if [[ -z "$exists" ]]; then
+		echo "table [$table_name] doesn't exist"
+		return
+	fi
+	#get where caluse
+	if [[ "$cmd" =~ [Ww][Hh][Ee][Rr][Ee][[:space:]]*(.*)";" ]]; then #([a-zA-Z0-9_=[:space:]-]*)
+		where="${BASH_REMATCH[1]}"
+		where=$(echo "$where" | tr -d ' ')
+		where_field=$(echo "$where" | cut -d'=' -f1 | tr -d ' ')
+		where_value=$(echo "$where" | cut -d'=' -f2 | tr -d ' ')
+		
+		if [[ -z "$where_field" || -z "$where_value" ]]; then
+			echo "Field and value must be provided for where caluse"
+			return
+		fi
+
+		#check that the field exists in table
+		field_exists=$(cat "$cur_db/.$table_name" | grep ^"$where_field:")
+		if [[ -z "$field_exists" ]]; then
+			echo "Field [$where_field] doesn't exist in table [$table_name]"
+			return
+		fi
+		declare -i where_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$where_field:" | cut -d":" -f1)
+		echo "where_field=$where_field , where_value=$where_value , where_field_pos=$where_field_pos"
+	else
+		#delete the entire table entries
+		#(echo "" | cat > "$cur_db/$table_name")
+		echo "Removed all entries in table [$table_name]"
+		return
+	fi
+	matching_positions=() #holds lines' indices that will be removed
+	declare -i num_matching=0
+	IFS=\n
+	declare -i idx=1
+	while read line; do
+		actual_value=$(echo "$line" | cut -d: -f$where_field_pos)
+		if [[ "$actual_value" == "$where_value" ]]; then
+			matching_positions+=($idx)
+		fi
+		((idx++))
+	done < "$cur_db/$table_name"
+	cleaned_positions=()
+	for pos in "${matching_positions[@]}"; do
+		cleaned_positions+=($(echo "$pos" | tr -d $'\n'))
+	done
+	echo "matching_positions: ${matching_positions[@]}"
+	num_matching="${#matching_positions[@]}"
+	echo "positions: ${matching_positions[*]}"
+	echo "num_matching: $num_matching"
+	all_table_lines=$(awk -v indices="${cleaned_positions[*]}" -v num="$num_matching" 'BEGIN{
+			FS=":"
+			split(indices, idx_arr, "n");
+    		for (i = 1; i <= num; i++) {
+        		idx_map[idx_arr[i]] = 1;
+    		}
+		}
+	{
+		if(!(NR in idx_map)){
+			print $0
+		}
+	}' "$cur_db/$table_name" )
+	echo "all_table_lines after deletion: "
+	echo "${all_table_lines[@]}"
+	#write all table lines into "$cur_db/$table_name"
+	(echo "${all_table_lines[@]}" | cat > "$cur_db/$table_name")
 }
 
 #handle the update command
@@ -653,7 +757,7 @@ while true; do
 	@("alter table "|"ALTER TABLE ")* )
 		do_alter_table "$user_cmd"
 		;;
-	@("describe table "|"DESCRIBE TABLE ")* )
+	@("describe "|"DESCRIBE  ")* )
 		do_describe_table "$user_cmd"
 		;;
 	#([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
