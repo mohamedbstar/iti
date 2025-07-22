@@ -63,7 +63,6 @@ do_drop_database(){
 		(ls -A "$db_name" | xargs rm -rf {} )
 		#remove db name from dbs_list
 		dbs_list=$(echo "$dbs_list" | sed '/^'"$db_name"'$/d' )
-		echo "DBS new are: $dbs_list"
 		#if it's cur_db ==> make cur_db empty
 		if [[ "$cur_db" == "$db_name" ]]; then
 			cur_db=""
@@ -74,14 +73,12 @@ do_drop_database(){
 #handles create table command
 do_create_table(){
 	cmd="$1"
-	echo "in do_create_table"
 	table_to_create=""
 	columns=""
 	pk="" #boolean variable to indicate if a pk has been set to this table or not
 	col_names_fo_far=""
 	#first extract the table name before parsing its columns
 	if [[ "$cmd" =~ [Cc][Rr][Ee][Aa][Tt][Ee][[:space:]][Tt][Aa][Bb][Ll][Ee][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*["("] ]]; then
-		echo "table name is: ${BASH_REMATCH[1]}"
 		table_to_create="${BASH_REMATCH[1]}"
 		if [[ "$table_to_create" =~ ^[0-9] ]]; then
 			echo "Table name can't start with a number"
@@ -105,7 +102,6 @@ do_create_table(){
 	#\(([[:space:]]*[a-zA-Z0-9_]+[[:space:]]*(int|string|boolean)[,|[[:space:]]*]?)[[:space:]]*\)[[:space:]]*
 	if [[ "$cmd" =~ [[:space:]]*\(([[:space:]]*[^\)]*[[:space:]]*)[[:space:]]*\) ]]; then
 		columns="${BASH_REMATCH[1]}"
-		echo "columns are: $columns"
 	else
 		echo "You must provide proper column names and types"
 		return
@@ -159,11 +155,6 @@ do_create_table(){
 	#add the table to the .db file
 	(echo "$table_to_create" >> "$cur_db/.db")
 }
-#handles alter table command
-do_alter_table(){
-	echo "altering"
-	
-}
 #handles describe table command
 do_describe_table(){
 	if [[ -z "$cur_db" ]]; then
@@ -213,11 +204,6 @@ do_drop_table(){
 	(rm "$cur_db/.$table_to_drop")
 	(sed -i '/^'"$table_to_drop"'$/d' "$cur_db/.db")
 	#update the variable cur_db_tables
-	#cur_db_tables=$(echo "$cur_db_tables" | awk -v tname="$table_to_drop" '{
-	#	if($0 == tname){
-	#		print tname
-	#	}
-	#}')
 	cur_db_tables=$(ls -l "$cur_db" | grep ^-)
 	cur_db_tables=$(replaceMultipleSpaces "$cur_db_tables" | cut -d' ' -f9)
 	echo "current tables are: $cur_db_tables"
@@ -249,7 +235,6 @@ do_select(){
 	fi
 	selected_columns=$(echo "$selected_columns" | tr -d ' '|tr ',' ':')
 
-	echo "selected columns are: $selected_columns"
 	#then extract the table name to select from
 	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*) ]]; then
 		#statements
@@ -257,7 +242,6 @@ do_select(){
 		#trim the table name
 		table_name=$(echo "$table_name" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 		table_name=$(echo "$table_name" | sed 's/;$//')
-		echo "trimmed table name: $table_name"
 		table_to_select="$table_name"
 	else
 		echo "You must provide a table name."
@@ -290,17 +274,14 @@ do_select(){
 			return
 		fi
 		where_field_pos=$(cat "$cur_db/.$table_to_select" | grep -n ^"$where_field:" | cut -d: -f1)
-		echo "where field is $where_field and its position is $where_field_pos"
 	fi
 
 	#select the provided columns
 	output=""
 	selected_columns_positions=()
 	all_table_fields=$(cat "$cur_db/.$table_to_select")
-	echo "all_table_fields are: $all_table_fields"
 	all_table_fields=$(echo "$all_table_fields" | sed -e 's/^[[:space:]\t]*//' -e 's/[[:space:]\t]*$//' | tr ' ' ':')
 	all_table_fields=$(replaceMultipleSpaces "$all_table_fields")
-	echo "all_table_fields are: $all_table_fields"
 	
 	declare -i number_of_selected_columns=$(echo "$selected_columns" | awk 'BEGIN{FS=":"}{print NF}')
 	
@@ -311,10 +292,7 @@ do_select(){
 	fi
 	
 
-	echo "selected columns are: ${selected_columns_array[@]}"
-	echo "number of selected columns is: $number_of_selected_columns"
 	number_of_table_fields=$(cat "$cur_db/.$table_to_select" | wc -l)
-	echo "number_of_selected_columns: $number_of_selected_columns"
 	if [[ "$selected_columns" == "*" ]]; then
 		IFS=$'\n'
 		while read record; do
@@ -356,7 +334,6 @@ do_select(){
 				select_output+=("$line")
 			fi
 		done
-		echo "selected columns positions are: ${selected_columns_positions[@]}"
 		#cat with cut for these positions
 		to_cut=$(echo "${selected_columns_positions[@]}" | tr ' ' ',')
 		for l in "${select_output[@]}"; do
@@ -387,7 +364,6 @@ do_insert(){
 	#get table name
 	if [[ $cmd =~ [Ii][Nn][Ss][Ee][Rr][Tt][[:space:]]+[Ii][Nn][Tt][Oo][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*)[[:space:]]*[(]?[[:space:]a-zA-Z0-9_,-]*[)]?[[:space:]]*[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
 		table_to_insert="${BASH_REMATCH[1]}"
-		echo "table name is: $table_to_insert"
 	else
 		echo "Invalid table name."
 		return
@@ -402,7 +378,6 @@ do_insert(){
 	table_fields_types=$(cat "$cur_db/.$table_to_insert" | cut -d: -f2)
 	number_of_table_fields=$(cat "$cur_db/.$table_to_insert" | wc -l)
 	(cat "$cur_db/.$table_to_insert")
-	echo "number of table fields: $number_of_table_fields"
 	#get fields if existing
 	if [[ "$cmd" =~  [Ii][Nn][Tt][Oo][[:space:]]+[a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*([\(][[:space:]a-zA-Z0-9_,-]*[\)][[:space:]]*)[Vv][Aa][Ll][Uu][Ee][Ss] ]]; then
 		fields_to_insert="${BASH_REMATCH[1]}"
@@ -410,12 +385,10 @@ do_insert(){
 		fields_to_insert=$(echo "$fields_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/,$//' )
 		fields_to_insert=$(echo "$fields_to_insert" | awk 'BEGIN { FS="," } { print $1":",$2 }' | tr -d ' ' | tr -d ')' | tr -d  '(' | sed 's/:$//')
 		number_of_fields=$(echo "$fields_to_insert" | awk 'BEGIN{FS=":"} {print NF}')
-		echo "fields to insert: $fields_to_insert and they are $number_of_fields"
 	fi
 	#get values to insert
 	if [[ "$cmd" =~ [Vv][Aa][Ll][Uu][Ee][Ss][[:space:]]*([^\)]+) ]]; then
 		values_to_insert="${BASH_REMATCH[1]}"
-		echo "values_to_insert: $values_to_insert"
 		values_to_insert=$(echo "$values_to_insert" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/,$//' | tr -d ')' | tr -d  '(')
 		values_to_insert=$(echo "$values_to_insert" | awk 'BEGIN { FS="," } { 
 		 for(i=1;i<=NF;i++){
@@ -428,7 +401,6 @@ do_insert(){
 			echo "You must provide values to insert into the table"
 			return
 		fi
-		echo "values to insert: $values_to_insert and they are $number_of_values"
 	else
 		echo "You must provide values to insert into the table"
 		return
@@ -450,9 +422,7 @@ do_insert(){
 			return
 		fi
 		#check matching data types for provided values and fields => get every data type for each field and compare it with value
-		
 		#check that all provided fields exist int the table
-		#read -ra table_fields_array <<< $table_fields
 		for ((i=0; i<$number_of_fields; i++)); do
 			exists=$(echo "$table_fields" | grep ^"${fields_array[$i]}"$)
 			if [[ "$exists" == "" ]]; then
@@ -492,14 +462,12 @@ do_insert(){
 	#Primary key check
 	#if there is a field that is a primary key, check the consistency
 	pk_row=$(cat "$cur_db/.$table_to_insert" | grep :[Pp][Kk]$)
-	echo "pk_row is $pk_row"
 	pk_field="" 
 	declare -i pk_field_pos_in_input=0
 	if [[ -n "$pk_row" ]]; then
 		#there is a primary key constraint ==> get the field that is primary key and check
 		pk_field=$(echo "$pk_row" | cut -d: -f1) #holds the name of the pk field in the table
 	fi
-	echo "pk_field is $pk_field"
 
 	if [[ "$number_of_fields" -gt 0 && -n "$pk_field" ]]; then
 		#check that primary key value is provided
@@ -516,29 +484,18 @@ do_insert(){
 			return
 		fi
 	fi
-	#check primary key uniqeness when giving specific fields 
-	#if [[ "$number_of_fields" -gt 0 && -n "$pk_field" ]]; then
-
-	#fi
+	
 	#check for uniquenesss of PK
 	if [[ -n "$pk_field" ]]; then #"$number_of_fields" -eq 0 &&
-		echo '"$number_of_fields" -eq 0 && -n "$pk_field"'
 		#value for the primary key field must exist in the ith location in fields array corresponding to the ith position of primary key field in the tble
-		#pk_field_pos=$(cat "$cur_db/.$table_to_insert")
-		#pk_field_pos=$(replaceMultipleSpaces "$pk_field_pos" | grep -n "$pk_field"| tr -d ' ' | cut -d':' -f1)
 		pk_field_pos=$(replaceMultipleSpaces "$(cat "$cur_db/.$table_to_insert")" | grep -n "^$pk_field" | cut -d':' -f1)
-		echo "pk_field_pos= $pk_field_pos"
 		pk_field_pos=$(( $pk_field_pos - 1 ))
 		
 		#pk_field_pos_in_input=$(( $pk_field_pos_in_input - 1 ))
 		#change this as the index should be the position of pk_field_pos_in_input not in the table
-		echo "pk_field_pos_in_input= $pk_field_pos_in_input"
 		pk_value="${values_array[$pk_field_pos_in_input]}" #the value that will be stored in the pk field
 		
-
-
 		#check for duplicates
-		echo "pk_value= $pk_value"
 		pk_field_pos=$(( $pk_field_pos + 1 )) #to be eligible for cut command as it starts from 1
 		duplicate=$(cat "$cur_db/$table_to_insert" | cut -d':' -f"$pk_field_pos")
 		duplicate=$(echo "$duplicate" |  grep -E ":?$pk_value:?")
@@ -556,14 +513,12 @@ do_insert(){
 			declare -i fi_pos=$(cat "$cur_db/.$table_to_insert" | grep -nE "^${fields_array[$i]}:"  | cut -d':' -f1)
 			#echo "first fi_pos= $fi_pos"
 			#fi_pos=$(replaceMultipleSpaces "$fi_pos" | cut -d':' -f1)
-			echo "fi_pos= $fi_pos has value ${values_array[$i]}" #prints correctly
 			fi_pos=$(( $fi_pos - 1 ))
 			fields_positions[$fi_pos]="${values_array[$i]}"
 		done
 		for (( i = 0; i < $number_of_table_fields; i++ )); do #for (( i = 0; i < $number_of_table_fields; i++ )); do
 			field_i="${fields_positions[$i]}"
 			if [[ -z "$field_i" ]]; then
-				echo "appending :"
 				if [[ $i -lt $(( $number_of_fields - 1 )) ]]; then
 					output+=":"
 				fi
@@ -581,11 +536,8 @@ do_insert(){
 		done
 	fi
 	#store output into table
-	echo "values array is: ${values_array[@]}"
-	echo "fields array is: ${fields_array[@]}"
-	echo "output is $output"
 	(echo "$output" >> "$cur_db/$table_to_insert")
-	echo "inserted values successfully"
+	echo "inserted values [$values_to_insert]"
 }
 
 #handle the delete command to delete records from tables
@@ -604,7 +556,6 @@ do_delete(){
 	if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*";" || "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]*([a-zA-Z_][a-zA-Z0-9_[:space:]-]*)[[:space:]]+[Ww][Hh][Ee][Rr][Ee][[:space:]]*.*";"[[:space:]]* ]]; then
 		table_name="${BASH_REMATCH[1]}"
 		table_name=$(echo "$table_name" | tr -d ' ')
-		echo "deleting from table [$table_name]"
 	else
 		echo "You must provide a table name to delete from"
 		return
@@ -634,7 +585,6 @@ do_delete(){
 			return
 		fi
 		declare -i where_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$where_field:" | cut -d":" -f1)
-		echo "where_field=$where_field , where_value=$where_value , where_field_pos=$where_field_pos"
 	else
 		#delete the entire table entries
 		(echo "" | cat > "$cur_db/$table_name")
@@ -656,10 +606,7 @@ do_delete(){
 	for pos in "${matching_positions[@]}"; do
 		cleaned_positions+=($(echo "$pos" | tr -d $'\n'))
 	done
-	echo "matching_positions: ${matching_positions[@]}"
 	num_matching="${#matching_positions[@]}"
-	echo "positions: ${matching_positions[*]}"
-	echo "num_matching: $num_matching"
 	all_table_lines=$(awk -v indices="${cleaned_positions[*]}" -v num="$num_matching" 'BEGIN{
 			FS=":"
 			split(indices, idx_arr, "n");
@@ -672,8 +619,6 @@ do_delete(){
 			print $0
 		}
 	}' "$cur_db/$table_name" )
-	echo "all_table_lines after deletion: "
-	echo "${all_table_lines[@]}"
 	#write all table lines into "$cur_db/$table_name"
 	(echo "${all_table_lines[@]}" | cat > "$cur_db/$table_name")
 }
@@ -699,7 +644,6 @@ do_update(){
 	if [[ "$cmd" =~ [Uu][Pp][Dd][Aa][Tt][Ee][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]+[Ss][Ee][Tt] ]]; then
 		table_name="${BASH_REMATCH[1]}"
 		table_name=$(echo "$table_name" | tr -d ' ')
-		echo "updating table [$table_name]"
 	else
 		echo "You must provide a table name to update"
 		return
@@ -724,7 +668,6 @@ do_update(){
 			return
 		fi
 		set_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$set_field:" | cut -d":" -f1)
-		echo "set_field=$set_field , set_value=$set_value , set_field_pos=$set_field_pos"
 	else
 		echo "You must provide what to set"
 		return
@@ -748,14 +691,12 @@ do_update(){
 			return
 		fi
 		declare -i where_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$where_field:" | cut -d":" -f1)
-		echo "where_field=$where_field , where_value=$where_value , where_field_pos=$where_field_pos"
 	fi
 	matching_positions=() #holds lines' indices that will be removed
 	declare -i num_matching=0
 	IFS=\n
 	declare -i idx=1
 	while read line; do
-		echo "line is: $line"
 		actual_value=$(echo "$line" | cut -d: -f$where_field_pos)
 		if [[ "$actual_value" == "$where_value" ]]; then
 			matching_positions+=($idx)
@@ -766,7 +707,6 @@ do_update(){
 	for pos in "${matching_positions[@]}"; do
 		cleaned_positions+=($(echo "$pos" | tr -d $'\n'))
 	done
-	echo "matching_positions: ${matching_positions[@]}"
 	num_matching="${#matching_positions[@]}"
 
 	all_table_lines=$(awk -v indices="${cleaned_positions[*]}" -v num="$num_matching" -v updated_val="$set_value" -v field_pos="$set_field_pos" 'BEGIN{
@@ -787,11 +727,8 @@ do_update(){
 	}' "$cur_db/$table_name")
 	#add the delimeter between fields
 	for line_idx in "${cleaned_positions[@]}"; do
-		echo "all lines line before update: ${all_table_lines[$line_idx]}"
 		all_table_lines[$line_idx]=$(echo "${all_table_lines[$line_idx]}" | tr ' ' ':')
-		echo "all lines line after update: ${all_table_lines[$line_idx]}"
 	done
-	echo "all lines after update: ${all_table_lines[@]}" 
 	(echo "${all_table_lines[@]}" | cat > "$cur_db/$table_name")
 }
 
@@ -862,7 +799,6 @@ while true; do
 		fi
 		;;
 	@("drop database "|"DROP DATABASE ")* )	
-		echo "Dropping database..."
 		do_drop_database $user_cmd
 		;;
 	
@@ -873,14 +809,9 @@ while true; do
 			do_create_table "$user_cmd"
 		fi
 		;;
-	#([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
-	@("alter table "|"ALTER TABLE ")* )
-		do_alter_table "$user_cmd"
-		;;
 	@("describe "|"DESCRIBE  ")* )
 		do_describe_table "$user_cmd"
 		;;
-	#([[:space:]])@([a-zA-Z])+([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
 	@("drop table "|"DROP TABLE ")* )
 		do_drop_table "$user_cmd"
 		;;
