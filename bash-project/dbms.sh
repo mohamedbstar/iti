@@ -53,7 +53,23 @@ loadTablesIntoCurDb(){
 }
 #handles drop database command
 do_drop_database(){
-	echo ""
+	db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" | tr -d ' ' )
+	#see if there is already existing database with the given name or not
+	exists=$(echo "$dbs_list" | grep "^$db_name$")
+	if [[ -z $exists ]]; then
+		echo "Database Doesn't exist."
+	else
+		#remove all tables inside the database
+		(ls -A "$db_name" | xargs rm -rf {} )
+		#remove db name from dbs_list
+		dbs_list=$(echo "$dbs_list" | sed '/^'"$db_name"'$/d' )
+		echo "DBS new are: $dbs_list"
+		#if it's cur_db ==> make cur_db empty
+		if [[ "$cur_db" == "$db_name" ]]; then
+			cur_db=""
+		fi
+		(rm -rf "$db_name")
+	fi
 }
 #handles create table command
 do_create_table(){
@@ -146,6 +162,7 @@ do_create_table(){
 #handles alter table command
 do_alter_table(){
 	echo "altering"
+	
 }
 #handles describe table command
 do_describe_table(){
@@ -827,11 +844,9 @@ while true; do
 			echo "The database you entered doesn't exist."
 		fi
 		;;
-	#([[:space:]])@([a-zA-Z])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]])
 	@("create database "|"CREATE DATABASE ")* )
-		echo "Creating a database..."
 		#parse the user command
-		db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" )
+		db_name=$(echo "$user_cmd" | cut -d' ' -f3 | tr -d ";" | tr -d ' ' )
 		#see if there is already existing database with the given name or not
 		exists=$(echo "$dbs_list" | grep "^$db_name$")
 		if [[ -n $exists ]]; then
@@ -846,18 +861,11 @@ while true; do
 			dbs_list=$(echo "$dbs_list" | sort -k1)
 		fi
 		;;
-	#@("drop database "|"DROP DATABASE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(';')*([[:space:]]) )
 	@("drop database "|"DROP DATABASE ")* )	
 		echo "Dropping database..."
 		do_drop_database $user_cmd
 		;;
-	#+([a-zA-Z0-9,_[:space:]])
-	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z_])*([a-zA-Z0-9_-])*([[:space:]])@(["("])*([[:space:]])+(+([a-zA-Z0-9_])*([[:space:]])@(int|string|boolean)?(,|[[:space:]]*))@([")"])*([[:space:]])@(';')*([[:space:]]) )
-	#@([cC][rR][eE][aA][tT][eE]+[[:space:]][tT][aA][bB][lL][eE]+[[:space:]]\
-	#+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]*\(\
-	#+([a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+(int|string|boolean)[[:space:]]*(,[[:space:]]*)?)+\
-	#\)[[:space:]]*;) )
-	#@("create table "|"CREATE TABLE ")*([[:space:]])@([a-zA-Z]_)*([a-zA-Z0-9_-])*([[:space:]])@(["("]) )	
+	
 	@("create table "|"CREATE TABLE ")* )	
 		if [[ -z "$cur_db" ]]; then
 			echo "No database selected. Please select a database first."
@@ -885,7 +893,6 @@ while true; do
 		;;
 
 	@("select "*|"SELECT "*))
-		echo "selecting..."
 		do_select "$user_cmd"
 		;;
 
@@ -894,12 +901,10 @@ while true; do
 		;;
 
 	@("delete "*|"DELETE "*))
-		echo "deleting..."
 		do_delete "$user_cmd"
 		;;
 
 	@("update "*|"UPDATE "*))
-		echo "updating..."
 		do_update "$user_cmd"
 		;;
 
