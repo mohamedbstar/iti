@@ -620,7 +620,7 @@ do_delete(){
 		echo "where_field=$where_field , where_value=$where_value , where_field_pos=$where_field_pos"
 	else
 		#delete the entire table entries
-		#(echo "" | cat > "$cur_db/$table_name")
+		(echo "" | cat > "$cur_db/$table_name")
 		echo "Removed all entries in table [$table_name]"
 		return
 	fi
@@ -663,7 +663,119 @@ do_delete(){
 
 #handle the update command
 do_update(){
-	echo ""
+	if [[ -z "$cur_db" ]]; then
+		echo "You must select a database first"
+		return
+	fi
+	cmd="$1"
+	table_name=""
+	where="" #holds where clause
+	where_field="" #holds where clause field
+	where_value="" #holds where clause value
+	declare -i where_field_pos=0 #holds where field position in table
+	set_expression="" #holds the entire set expression
+	set_field="" #holds field to set
+	set_value="" #holds value to set
+	declare -i set_field_pos=0 #holds position of field to set in the table
+
+	#extract table name and also enforces SET to exist
+	if [[ "$cmd" =~ [Uu][Pp][Dd][Aa][Tt][Ee][[:space:]]+([a-zA-Z_][a-zA-Z0-9_-]*)[[:space:]]+[Ss][Ee][Tt] ]]; then
+		table_name="${BASH_REMATCH[1]}"
+		table_name=$(echo "$table_name" | tr -d ' ')
+		echo "updating table [$table_name]"
+	else
+		echo "You must provide a table name to update"
+		return
+	fi
+	#check if table exists or not
+	table_exists=$(cat "$cur_db/.db" | grep ^"$table_name"$)
+	if [[ -z "$table_exists" ]]; then
+		echo "table [$table_name] doesn't exist"
+		return
+	fi
+	#extract field=value to be set
+	if [[ "$cmd" =~ [Ss][Ee][Tt][[:space:]]+([a-zA-Z0-9_=[:space:]-]*)[[:space:]]*[[Ww][Hh][Ee][Rr][Ee]]?[[:space:]]*(.*)";"[[:space:]]* ]]; then
+		set_expression="${BASH_REMATCH[1]}"
+		set_expression=$(echo "$set_expression" | tr -d ' ')
+		set_field=$(echo "$set_expression" | cut -d'=' -f1)
+		set_value=$(echo "$set_expression" | cut -d'=' -f2)
+
+		#check that the field exists in table
+		set_field_exists=$(cat "$cur_db/.$table_name" | grep ^"$set_field:")
+		if [[ -z "$set_field_exists" ]]; then
+			echo "Field [$set_field] doesn't exist in table [$table_name]"
+			return
+		fi
+		set_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$set_field:" | cut -d":" -f1)
+		echo "set_field=$set_field , set_value=$set_value , set_field_pos=$set_field_pos"
+	else
+		echo "You must provide what to set"
+		return
+	fi
+	#get where caluse
+	if [[ "$cmd" =~ [Ww][Hh][Ee][Rr][Ee][[:space:]]*(.*)";"[[:space:]]* ]]; then 
+		where="${BASH_REMATCH[1]}"
+		where=$(echo "$where" | tr -d ' ')
+		where_field=$(echo "$where" | cut -d'=' -f1 | tr -d ' ')
+		where_value=$(echo "$where" | cut -d'=' -f2 | tr -d ' ')
+		
+		if [[ -z "$where_field" || -z "$where_value" ]]; then
+			echo "Field and value must be provided for where caluse"
+			return
+		fi
+
+		#check that the field exists in table
+		field_exists=$(cat "$cur_db/.$table_name" | grep ^"$where_field:")
+		if [[ -z "$field_exists" ]]; then
+			echo "Field [$where_field] doesn't exist in table [$table_name]"
+			return
+		fi
+		declare -i where_field_pos=$(cat "$cur_db/.$table_name" | grep -n ^"$where_field:" | cut -d":" -f1)
+		echo "where_field=$where_field , where_value=$where_value , where_field_pos=$where_field_pos"
+	fi
+	matching_positions=() #holds lines' indices that will be removed
+	declare -i num_matching=0
+	IFS=\n
+	declare -i idx=1
+	while read line; do
+		echo "line is: $line"
+		actual_value=$(echo "$line" | cut -d: -f$where_field_pos)
+		if [[ "$actual_value" == "$where_value" ]]; then
+			matching_positions+=($idx)
+		fi
+		((idx++))
+	done < "$cur_db/$table_name"
+	cleaned_positions=()
+	for pos in "${matching_positions[@]}"; do
+		cleaned_positions+=($(echo "$pos" | tr -d $'\n'))
+	done
+	echo "matching_positions: ${matching_positions[@]}"
+	num_matching="${#matching_positions[@]}"
+
+	all_table_lines=$(awk -v indices="${cleaned_positions[*]}" -v num="$num_matching" -v updated_val="$set_value" -v field_pos="$set_field_pos" 'BEGIN{
+			FS=":"
+			OFS=":"
+			split(indices, idx_arr, " ");
+    		for (i = 1; i <= num; i++) {
+        		idx_map[idx_arr[i]] = 1;
+    		}
+		}
+	{
+		if(NR in idx_map){
+			$field_pos=updated_val
+			print $0
+		}else{
+			print $0
+		}
+	}' "$cur_db/$table_name")
+	#add the delimeter between fields
+	for line_idx in "${cleaned_positions[@]}"; do
+		echo "all lines line before update: ${all_table_lines[$line_idx]}"
+		all_table_lines[$line_idx]=$(echo "${all_table_lines[$line_idx]}" | tr ' ' ':')
+		echo "all lines line after update: ${all_table_lines[$line_idx]}"
+	done
+	echo "all lines after update: ${all_table_lines[@]}" 
+	(echo "${all_table_lines[@]}" | cat > "$cur_db/$table_name")
 }
 
 #when starting the program ==> load all database names in the global variable dbs_list
