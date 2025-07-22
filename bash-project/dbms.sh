@@ -314,7 +314,6 @@ do_select(){
 				echo "Invalid field [${selected_columns_array[$i]}]"
 				return
 			fi
-			echo "pos is $pos"
 			#pos=$(( $pos - 1 ))
 			selected_columns_positions+=($pos)
 		done
@@ -461,7 +460,7 @@ do_insert(){
 	fi
 	#Primary key check
 	#if there is a field that is a primary key, check the consistency
-	pk_row=$(cat "$cur_db/.$table_to_insert" | grep :[Pp][Kk]$)
+	pk_row=$(cat "$cur_db/.$table_to_insert" | grep -E :[Pp][Kk][:]?$)
 	pk_field="" 
 	declare -i pk_field_pos_in_input=0
 	if [[ -n "$pk_row" ]]; then
