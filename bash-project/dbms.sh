@@ -191,6 +191,10 @@ do_drop_table(){
 #handle the select command
 do_select(){
 	table_to_select=""
+	where="" #holds where caluse condition
+	where_field="" #holds the field in where caluse
+	where_value="" #holds the value of where clause
+	declare -i where_field_pos=0
 	#check if there is a current database selected or not
 	if [[ -z "$cur_db" ]]; then
 		echo "You must USE a database to begin selecting."
@@ -211,7 +215,7 @@ do_select(){
 
 	echo "selected columns are: $selected_columns"
 	#then extract the table name to select from
-	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]([a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*[;][[:space:]]*) ]]; then
+	if [[ "$user_cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z][a-zA-Z0-9_-]*[[:space:]]*) ]]; then
 		#statements
 		table_name="${BASH_REMATCH[1]}"
 		#trim the table name
@@ -231,8 +235,27 @@ do_select(){
 		return
 	fi
 
-	#TODO: check if there is a where condition
+	#check if there is a where condition
+	if [[ "$user_cmd" =~ [Ww][Hh][Ee][Rr][Ee][[:space:]]*([a-z0-9A-Z=_[:space:]-]+)?[[:space:]]*";"[[:space:]]* ]]; then
+		where="${BASH_REMATCH[1]}"
+		where=$(echo "$where" | tr -d ' ')
+		where_field=$(echo "$where" | cut -d'=' -f1)
+		where_value=$(echo "$where" | cut -d'=' -f2)
 
+		#check field and value exist
+		if [[ -z "$where_field" || -z "$where_value" ]]; then
+			echo "Incomplete where caluse"
+			return
+		fi
+		#check field exists in the table
+		field_exists=$(cat "$cur_db/.$table_to_select" | grep ^"$where_field")
+		if [[ -z "$field_exists" ]]; then
+			echo "Provided field [$where_field] doesn't exist in the table"
+			return
+		fi
+		where_field_pos=$(cat "$cur_db/.$table_to_select" | grep -n ^"$where_field:" | cut -d: -f1)
+		echo "where field is $where_field and its position is $where_field_pos"
+	fi
 
 	#select the provided columns
 	output=""
@@ -253,18 +276,26 @@ do_select(){
 	
 
 	echo "selected columns are: ${selected_columns_array[@]}"
+	echo "number of selected columns is: $number_of_selected_columns"
 	number_of_table_fields=$(cat "$cur_db/.$table_to_select" | wc -l)
 	echo "number_of_selected_columns: $number_of_selected_columns"
 	if [[ "$selected_columns" == "*" ]]; then
 		IFS=$'\n'
 		while read record; do
-			printf "%s\n" "$record"
+			if [[ -n "$where" ]]; then #if there is a where caluse
+				field_to_check=$(echo "$record" | cut -d: -f$where_field_pos)
+				if [[ "$field_to_check" == "$where_value" ]]; then
+					printf "%s\n" "$record"
+				fi
+			else
+				printf "%s\n" "$record"
+			fi
 		done < "$cur_db/$table_to_select"
 	else
 		#get selected columns positions
 		for((i=0; i < $number_of_selected_columns; i++)); do
-			declare -i pos=$(echo "$all_table_fields" | grep -n "${selected_columns_array[$i]}" | cut -d: -f1)
-			pos_string=$(echo "$all_table_fields" | grep "${selected_columns_array[$i]}" | cut -d: -f1)
+			declare -i pos=$(echo "$all_table_fields" | grep -n ^"${selected_columns_array[$i]}:" | cut -d: -f1)
+			pos_string=$(echo "$all_table_fields" | grep ^"${selected_columns_array[$i]}:" | cut -d: -f1)
 			if [[ -z $pos_string ]]; then
 				echo "Invalid field [${selected_columns_array[$i]}]"
 				return
@@ -273,10 +304,28 @@ do_select(){
 			#pos=$(( $pos - 1 ))
 			selected_columns_positions+=($pos)
 		done
+		table_lines=()
+		IFS=$'\n'
+		while read line; do
+			table_lines+=("$line")
+		done < "$cur_db/$table_to_select"
+		select_output=()
+		for line in "${table_lines[@]}"; do
+			if [[ -n "$where" ]]; then
+				field_to_check=$(echo "$line" | cut -d: -f$where_field_pos)
+				if [[ "$field_to_check" == "$where_value" ]]; then
+					select_output+=("$line")
+				fi
+			else
+				select_output+=("$line")
+			fi
+		done
 		echo "selected columns positions are: ${selected_columns_positions[@]}"
 		#cat with cut for these positions
 		to_cut=$(echo "${selected_columns_positions[@]}" | tr ' ' ',')
-		(cat "$cur_db/$table_to_select" | cut -d: -f"$to_cut")
+		for l in "${select_output[@]}"; do
+			(echo "$l" | cut -d: -f"$to_cut")
+		done
 	fi
 
 }
