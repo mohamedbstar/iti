@@ -356,14 +356,6 @@ do_aggregate(){
 			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
 				v="${uniqe_values_map[$k]}"
 				declare -i field_max=$(( -2**63 ))
-				#group_by_field_pos first or in middle or last
-				#if [[ "$group_by_field_pos" == 1 ]]; then #it's first
-				#	relevant_rows=$(grep ^"$v" "$cur_db/$table_name")
-				#elif [[ "$group_by_field_pos" -lt "$number_of_table_fields" ]]; then
-				#	relevant_rows=$(grep ":$v:" "$cur_db/$table_name")
-				#else
-				#	relevant_rows=$(grep ":$v"$ "$cur_db/$table_name")
-				#fi
 				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
 				echo "relevant rows for $v are $relevant_rows"
 				#get the max of the field field_to_be_maxed by getting its position first and then maxing this column
@@ -374,7 +366,26 @@ do_aggregate(){
 		elif [[ "$func" =~ ^"min"$ || "$func" =~ ^"MIN"$ ]]; then
 			echo "minig..."
 			#must be a number
+			field_to_be_minned=${agg_funcs_fields[$idx]}
+			echo "after field_to_be_maxed"
+			its_type=$(grep ^"$field_to_be_minned:" "$cur_db/.$table_name" | cut -d: -f2)
+			echo "before if"
+			if [[ "$its_type" != "int" && "$its_type" != "INT" ]]; then
+				echo "Can't do max operation of field [$field_to_be_minned] of type not int"
+				continue
+			fi
 			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
+			echo "Entering for"
+			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
+				v="${uniqe_values_map[$k]}"
+				declare -i field_min=$(( 2**64 ))
+				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
+				echo "relevant rows for $v are $relevant_rows"
+				#get the max of the field field_to_be_maxed by getting its position first and then maxing this column
+				field_to_be_minned_pos=$(grep -n ^"$field_to_be_minned:"  "$cur_db/.$table_name"| cut -d: -f1)
+				field_min=$(echo "$relevant_rows" | cut -d: -f$field_to_be_minned_pos | sort -n | head -1)
+				echo "field min is: $field_min"
+			done
 		else
 			echo "summing"
 			#must be a number
