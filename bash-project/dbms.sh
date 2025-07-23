@@ -218,6 +218,7 @@ do_aggregate(){
 	agg_funcs=""
 	table_name=""
 	group_by_field=""
+	declare -i number_of_table_fields=0
 	declare -i group_by_field_pos=0
 	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([a-zA-Z0-9\(\)[:space:],\*_-]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
 		agg_funcs="${BASH_REMATCH[1]}"
@@ -236,6 +237,7 @@ do_aggregate(){
 			echo "Table [$table_name] doesn't exist"
 			return
 		fi
+		number_of_table_fields=$(cat "$cur_db/.$table_name" | wc -l)
 	else
 		echo "You must provide a table name"
 		return
@@ -313,17 +315,72 @@ do_aggregate(){
 	echo "$sorted_records"
 	#then do the functions on sorted records
 	results=()
+	#create a map of [value : count] of group_by_field
+	uniqe_values=$( echo "$sorted_records" | cut -d: -f${group_by_field_pos} | uniq -c )
+	uniqe_values=$(replaceMultipleSpaces "$uniqe_values" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr ' ' ':')
+	declare -A uniqe_values_map=()
+	mapfile -t uniqe_values_arr < <(echo "$sorted_records" | cut -d: -f${group_by_field_pos} | uniq -c | sed 's/^[[:space:]]*//' | tr -s ' ' ':')
+	for line in "${uniqe_values_arr[@]}"; do
+		echo "line is $line"
+		c=$(echo "$line" | cut -d: -f1)
+		v=$(echo "$line" | cut -d: -f2)
+		uniqe_values_map["$v"]="$c"
+	done
+	echo "uniqe_values: $uniqe_values"
+	echo "unique values: ${uniqe_values[@]}"
+	echo "uniqe_values_map: ${!uniqe_values_map[@]}"
+	declare -i idx=0
 	for func in "${agg_funcs_names[@]}"; do
 		if [[ "$func" =~ ^"count"$ || "$func" =~ ^"COUNT"$  ]]; then
 			echo "counting..."
-			res=()
+			#get unique values => loop over them each time grepping rows of that unique value and then counting rows for each unique value
+			echo "============= COUNT ============="
+			for k in "${!uniqe_values_map[@]}"; do
+				echo "$k: ${uniqe_values_map[$k]}"
+			done
 		elif [[ "$func" =~ ^"max"$ || "$func" =~ ^"MAX"$ ]]; then
 			echo "maxing..."
+			#field to be maxed out must be int
+			
+			field_to_be_maxed=${agg_funcs_fields[$idx]}
+			echo "after field_to_be_maxed"
+			its_type=$(grep ^"$field_to_be_maxed:" "$cur_db/.$table_name" | cut -d: -f2)
+			echo "before if"
+			if [[ "$its_type" != "int" && "$its_type" != "INT" ]]; then
+				echo "Can't do max operation of field [$field_to_be_maxed] of type not int"
+				continue
+			fi
+			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
+			declare -A max=()
+			echo "Entering for"
+			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
+				v="${uniqe_values_map[$k]}"
+				declare -i field_max=$(( -2**63 ))
+				#group_by_field_pos first or in middle or last
+				#if [[ "$group_by_field_pos" == 1 ]]; then #it's first
+				#	relevant_rows=$(grep ^"$v" "$cur_db/$table_name")
+				#elif [[ "$group_by_field_pos" -lt "$number_of_table_fields" ]]; then
+				#	relevant_rows=$(grep ":$v:" "$cur_db/$table_name")
+				#else
+				#	relevant_rows=$(grep ":$v"$ "$cur_db/$table_name")
+				#fi
+				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
+				echo "relevant rows for $v are $relevant_rows"
+				#get the max of the field field_to_be_maxed by getting its position first and then maxing this column
+				field_to_be_maxed_pos=$(grep -n ^"$field_to_be_maxed:"  "$cur_db/.$table_name"| cut -d: -f1)
+				field_max=$(echo "$relevant_rows" | cut -d: -f$field_to_be_maxed_pos | sort -nr | head -1)
+				echo "field max is: $field_max"
+			done
 		elif [[ "$func" =~ ^"min"$ || "$func" =~ ^"MIN"$ ]]; then
 			echo "minig..."
+			#must be a number
+			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
 		else
 			echo "summing"
+			#must be a number
+			#get unique values => loop over them each time grepping rows of that unique value and then add agg_func_field for each unique value
 		fi
+		((idx++))
 	done
 }
 #handle the select command
