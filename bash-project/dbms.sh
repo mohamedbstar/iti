@@ -331,6 +331,9 @@ do_aggregate(){
 	echo "uniqe_values_map: ${!uniqe_values_map[@]}"
 	declare -i idx=0
 	for func in "${agg_funcs_names[@]}"; do
+		field_to_operate_on=${agg_funcs_fields[$idx]}
+		field_to_operate_on_type=$(grep ^"$field_to_operate_on:" "$cur_db/.$table_name" | cut -d: -f2)
+		field_to_operate_on_pos=$(grep -n ^"$field_to_operate_on:"  "$cur_db/.$table_name"| cut -d: -f1)
 		if [[ "$func" =~ ^"count"$ || "$func" =~ ^"COUNT"$  ]]; then
 			echo "counting..."
 			#get unique values => loop over them each time grepping rows of that unique value and then counting rows for each unique value
@@ -377,7 +380,7 @@ do_aggregate(){
 			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
 			echo "Entering for"
 			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
-				v="${uniqe_values_map[$k]}"
+				
 				declare -i field_min=$(( 2**64 ))
 				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
 				echo "relevant rows for $v are $relevant_rows"
@@ -390,6 +393,22 @@ do_aggregate(){
 			echo "summing"
 			#must be a number
 			#get unique values => loop over them each time grepping rows of that unique value and then add agg_func_field for each unique value
+			if [[ "$field_to_operate_on_type" != "int" && "$field_to_operate_on_type" != "INT" ]]; then
+				echo "Can't do SUM operation on [$field_to_operate_on] with type [$field_to_operate_on_type]"
+				return
+			fi
+			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
+				declare -i field_sum=0
+				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
+				echo "relevant rows for $k are $relevant_rows"
+				mapfile -t relevant_rows_arr < <(echo "$relevant_rows")
+				echo "relevant_rows_arr: "
+				for i in "${relevant_rows_arr[@]}"; do
+					echo "$i"
+					field_sum+=$(echo "$i" | cut -d: -f$field_to_operate_on_pos)
+				done 
+				echo "sum for field [$k] is $field_sum"
+			done
 		fi
 		((idx++))
 	done
