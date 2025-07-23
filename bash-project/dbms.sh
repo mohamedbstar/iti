@@ -209,7 +209,123 @@ do_drop_table(){
 	echo "current tables are: $cur_db_tables"
 	echo "deleted table $table_to_drop"
 }
-
+#handles aggregation
+do_aggregate(){
+	echo "aggregating..."
+	cmd="$1"
+	#extract aggregation functions
+	allowed_agg_funcs=("count" "COUNT" "max" "MAX" "min" "MIN" "sum" "SUM")
+	agg_funcs=""
+	table_name=""
+	group_by_field=""
+	declare -i group_by_field_pos=0
+	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([a-zA-Z0-9\(\)[:space:],\*_-]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
+		agg_funcs="${BASH_REMATCH[1]}"
+		echo "agg_funcs: $agg_funcs"
+	else
+		echo "You must provide at least one aggregate function."
+		return
+	fi
+	#extract table name
+	if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]+[Gg][Rr][Oo][Uu][Pp] ]]; then
+		table_name="${BASH_REMATCH[1]}"
+		echo "table_name is: $table_name"
+		#check the table exists in the cur_db
+		exists=$(echo "$cur_db_tables" | grep ^"$table_name"$)
+		if [[ -z "$exists" ]]; then
+			echo "Table [$table_name] doesn't exist"
+			return
+		fi
+	else
+		echo "You must provide a table name"
+		return
+	fi
+	#extract group by field
+	if [[ "$cmd" =~ [Gg][Rr][Oo][Uu][Pp][[:space:]]+[Bb][Yy][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]*[";"][[:space:]]* ]]; then
+		group_by_field="${BASH_REMATCH[1]}"
+		echo "group by field is $group_by_field"
+		#check the field exists in the table
+		exists=$(cat "$cur_db/.$table_name" | grep ^"$group_by_field:")
+		if [[ -z "$exists" ]]; then
+			echo "The provided [$group_by_field] doesn't exist in table [$table_name]"
+			return
+		fi
+		group_by_field_pos=$(grep -n ^"$group_by_field:" "$cur_db/.$table_name" | cut -d: -f1)
+	else
+		echo "You must provide a group by field"
+		return
+	fi
+	agg_funcs=$(replaceMultipleSpaces "$agg_funcs" | tr -d ' ')
+	echo "agg_funcs: $agg_funcs"
+	
+	IFS="," read -a agg_funcs_arr <<< "$agg_funcs"
+	for i in "${agg_funcs_arr[@]}"; do
+		echo "agg: $i"
+	done
+	agg_funcs_names=()
+	agg_funcs_fields=()
+	for inp in "${agg_funcs_arr[@]}"; do
+		f=$(echo "$inp" | cut -d"(" -f1 | tr -d ' ')
+		v=$(echo "$inp" | cut -d"(" -f2 | tr -d ')' | tr -d ' ')
+		agg_funcs_names+=("$f")
+		agg_funcs_fields+=("$v")
+	done
+	echo "funcs_names: ${agg_funcs_names[@]}"
+	echo "funcs_fields: ${agg_funcs_fields[@]}"
+	#check that each function is allowed
+	for fun in "${agg_funcs_names[@]}"; do
+		found=false
+		for f in "${allowed_agg_funcs[@]}"; do
+    		if [[ "$f" == "$fun" ]]; then
+        		found=true
+        		break
+    		fi
+		done
+		if ! $found ; then
+			echo "found: $found"
+			echo "Function [$fun] is not recognisable"
+			return
+		fi
+	done
+	#check that each field is * or exists in the table
+	for fie in "${agg_funcs_fields[@]}"; do
+		valid=false
+		if [[ "$fie" =~ ^\*$ ]]; then
+			valid=true
+		else
+			exists=$(grep -E ^"${fie}:" "$cur_db/.$table_name")
+			if [[ -n "$exists" ]]; then
+				valid=true
+			fi
+		fi
+		if ! $valid ; then
+			echo "Invalid Field [$fie]"
+			return
+		fi
+	done
+	#start grouping => simple sorting but be careful for numbers
+	group_by_field_type=$(grep ^"${fie}:" "$cur_db/.$table_name" | cut -d: -f2)
+	if [[ "$group_by_field_type" =~ ^"int"$ ]]; then
+		sorted_records=$(cat "$cur_db/$table_name" | sort -nt: -k$group_by_field_pos)
+	else
+		sorted_records=$(cat "$cur_db/$table_name" | sort -t: -k$group_by_field_pos)
+	fi
+	echo "$sorted_records"
+	#then do the functions on sorted records
+	results=()
+	for func in "${agg_funcs_names[@]}"; do
+		if [[ "$func" =~ ^"count"$ || "$func" =~ ^"COUNT"$  ]]; then
+			echo "counting..."
+			res=()
+		elif [[ "$func" =~ ^"max"$ || "$func" =~ ^"MAX"$ ]]; then
+			echo "maxing..."
+		elif [[ "$func" =~ ^"min"$ || "$func" =~ ^"MIN"$ ]]; then
+			echo "minig..."
+		else
+			echo "summing"
+		fi
+	done
+}
 #handle the select command
 do_select(){
 	table_to_select=""
@@ -222,7 +338,11 @@ do_select(){
 		echo "You must USE a database to begin selecting."
 		return
 	fi
-
+	#check for aggregation
+	if [[ "$user_cmd" =~ " GROUP " || "$user_cmd" =~ " group " ]]; then
+		do_aggregate "$user_cmd"
+		return
+	fi
 	#first extract columns to be selected
 	selected_columns=""
 	if [[ "$user_cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]*\*[[:space:]]*[Ff][Rr][Oo][Mm] ]]; then
