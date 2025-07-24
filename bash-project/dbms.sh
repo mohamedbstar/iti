@@ -413,6 +413,7 @@ do_aggregate(){
 		((idx++))
 	done
 }
+#handles join operation
 do_join(){
 	#syntax is select column1[column2|...] from table1 join table2 on field1=field2
 	cmd="$1"
@@ -511,33 +512,57 @@ do_join(){
 		return
 	fi
 	#check that each field in on caluse exists in the table mentioned before it
+	# on_arr should now contain 2 fields like "x.id" and "x2.id"
+	if [[ ${#on_arr[@]} -ne 2 ]]; then
+		echo "Malformed ON clause"
+		return
+	fi
+
+	declare -a on_tables=()
+	declare -a on_fields=()
 	for o in "${on_arr[@]}"; do
-		t=$(echo "$o" | cut -d '=' -f1)
-		f=$(echo "$o" | cut -d '=' -f2)
-		if [[ -z $(grep ^"$o:" "$cur_db/.$t") ]]; then
+		t=$(echo "$o" | cut -d'.' -f1)
+		f=$(echo "$o" | cut -d'.' -f2)
+		if [[ -z $(grep ^"$f:" "$cur_db/.$t") ]]; then
 			echo "Field [$f] doesn't exist in table [$t]"
 			return
 		fi
+		on_tables+=("$t")
+		on_fields+=("$f")
 	done
+
 	#check fields are of the same datatypes
-	t1_join_field_type=$(grep ^"${on_arr[0]}:" "$cur_db/.$t1" | cut -d: -f2)
-	t2_join_field_type=$(grep ^"${on_arr[1]}:" "$cur_db/.$t2" | cut -d: -f2)
+	t1_join_field_type=$(grep ^"${on_fields[0]}:" "$cur_db/.$t1" | cut -d: -f2)
+	t2_join_field_type=$(grep ^"${on_fields[1]}:" "$cur_db/.$t2" | cut -d: -f2)
 	if [[ "$t1_join_field_type" != "$t2_join_field_type" ]]; then
 		echo "fields [${on_arr[0]}] and [${on_arr[1]}] are not of the same type"
 		return
 	fi
 	#start joining tables on common fields
-	declare -i t1_join_field_pos=$(grep -n "${on_arr[0]}" "$cur_db/.$t1" | cut -d: -f1)
-	declare -i t2_join_field_pos=$(grep -n "${on_arr[1]}" "$cur_db/.$t2" | cut -d: -f2)
+	declare -i t1_join_field_pos=$(grep -n "$(echo "${on_arr[0]}" | cut -d'.' -f2)" "$cur_db/.$t1" | cut -d: -f1)
+	declare -i t2_join_field_pos=$(grep -n "$(echo "${on_arr[1]}" | cut -d'.' -f2)" "$cur_db/.$t2" | cut -d: -f1)
 
+	echo "before sort"
+	echo "t1_join_field_pos: $t1_join_field_pos"
+	echo "t2_join_field_pos: $t2_join_field_pos"
+	echo "t1 is $t1 is $t2"
+	echo "t1 field type is $t1_join_field_type"
+	echo "t2 field type is $t2_join_field_type"
 	if [[ "$t1_join_field_type" == "int" ]]; then
 		tr ':' ' ' < "$cur_db/$t1" | sort -nk$t1_join_field_pos > t1_sorted
 		tr ':' ' ' < "$cur_db/$t2" | sort -nk$t2_join_field_pos > t2_sorted
+		echo "in number"
+		#t1_sorted=$(cat "$cur_db/$t1" | tr ':' ' ' | sort -nk$t1_join_field_pos)
+		#t2_sorted=$(cat "$cur_db/$t2" | tr ':' ' ' | sort -nk$t2_join_field_pos)
 	else
 		tr ':' ' ' < "$cur_db/$t1" | sort -k$t1_join_field_pos > t1_sorted
 		tr ':' ' ' < "$cur_db/$t2" | sort -k$t2_join_field_pos > t2_sorted
 	fi
-	joined_output=$(join -$t1_join_field_pos 1 -$t2_join_field_pos 2 t1_sorted t2_sorted)
+	echo "======== t1 sorted ======="
+	(cat "t1_sorted")
+	echo "======== t2 sorted ======="
+	(cat "t2_sorted")
+	joined_output=$(join -1 $t1_join_field_pos  -2 $t2_join_field_pos  t1_sorted t2_sorted)
 	(rm -f t1_sorted t2_sorted)
 	echo "joined output: "
 	echo "$joined_output"
