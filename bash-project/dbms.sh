@@ -414,7 +414,7 @@ do_aggregate(){
 	done
 }
 #handles join operation
-do_join(){
+: 'do_join(){
 	#syntax is select column1[column2|...] from table1 join table2 on field1=field2
 	cmd="$1"
 	declare -a columns_to_select_arr=()
@@ -424,10 +424,11 @@ do_join(){
 	tables_exist_in_columns=false
 	free_fields_arr=()
 	on=""
+	all_selected=false
 	declare -a on_arr=()
 	declare -a tables_in_columns_arr=()
 	declare -a fields_with_tables_arr=()
-	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alnum:]_[:space:],\*\(\)\.]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
+	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alnum:]_[:space:],\(\)\.]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
     	columns=$(echo "${BASH_REMATCH[1]}" | tr -d ' ')
     	mapfile -t columns_to_select_arr < <(echo "$columns" | tr ',' $'\n')
     	
@@ -436,9 +437,13 @@ do_join(){
     		echo "tables exist"
     		tables_exist_in_columns=true
     	fi
+    elif [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+(\*)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
+    	all_selected=true
+    	echo "* is used"
+    	echo "all_selected is $all_selected"
 	fi
 	#extract table names if exist in columns array
-	if [[ "$tables_exist_in_columns" ]]; then
+	if [[ $(! $all_selected) && "$tables_exist_in_columns" ]]; then
 		for fname in "${columns_to_select_arr[@]}"; do
 			if [[ "$fname" =~ ([a-zA-Z0-9_-]+)(\.)[a-zA-Z0-9_-]+ ]]; then
 				tname=$(echo "$fname" | cut -d'.' -f1)
@@ -448,12 +453,16 @@ do_join(){
 				echo "table is $tname"
 				echo "field is $f"
 				table_exists_in_arr=false
-				if [[ "${tables_in_columns_arr[*]}" =~ " $tname " ]]; then
-					table_exists_in_arr=true
-				fi
-				if [[ ! $table_exists_in_arr ]]; then
+				for tt in "${tables_in_columns_arr[@]}"; do
+					if [[ "$tt" == "$tname" ]]; then
+						table_exists_in_arr=true
+						break
+					fi
+				done
+				if [[ (! $table_exists_in_arr) ]]; then
 					tables_in_columns_arr+=("$tname")
 				fi
+
 			else
 				free_fields_arr+=("$fname")
 			fi
@@ -497,12 +506,15 @@ do_join(){
 		done
 	fi
 	#check all free fields exist in exactky one of the two tables;
-	for freef in "${free_fields_arr[@]}" ; do
-		if [[ -z $(grep "$freef" "$cur_db/.$t1") && -z $(grep "$freef" "$cur_db/.$t2") ]]; then
-			echo "Field [$freef] doesn't exist in either of the two tables [$t1] [$t2]"
-			return
-		fi
-	done
+	if [[ ! $all_selected  ]]; then
+		echo "checking each field"
+		for freef in "${free_fields_arr[@]}" ; do
+			if [[ -z $(grep "$freef" "$cur_db/.$t1") && -z $(grep "$freef" "$cur_db/.$t2") ]]; then
+				echo "Field [$freef] doesn't exist in either of the two tables [$t1] [$t2]"
+				return
+			fi
+		done
+	fi
 	#get on condition
 	if [[ "$cmd" =~ [Oo][Nn](.*) ]]; then
 		on=$(echo "${BASH_REMATCH[1]}" | tr -d ' ' | tr -d ';')
@@ -562,10 +574,249 @@ do_join(){
 	(cat "t1_sorted")
 	echo "======== t2 sorted ======="
 	(cat "t2_sorted")
-	joined_output=$(join -1 $t1_join_field_pos  -2 $t2_join_field_pos  t1_sorted t2_sorted)
+	joined_output=$(join -1 $t1_join_field_pos  -2 $t2_join_field_pos  t1_sorted t2_sorted | tr ' ' ':')
 	(rm -f t1_sorted t2_sorted)
 	echo "joined output: "
-	echo "$joined_output"
+	
+	#the behaviour of join: get the jon_field first then list all remaining 
+	echo "after: all_selected: $all_selected"
+	if [[ $($all_selected == true) ]]; then
+		echo "echoing *"
+		echo "$joined_output"
+	else
+		#get the position of each selected columns from inside sorted_t1 and sorted_t2
+		#columns_to_select_arr
+		#tables_in_columns_arr
+		declare -a fields_positions=()
+		echo "tables_in_columns_arr= ${#tables_in_columns_arr[@]}"
+		if [[ ${#fields_with_tables_arr[@]} == ${#tables_in_columns_arr[@]} ]]; then
+			for (( i = 0; i < ${#tables_in_columns_arr[@]}; i++ )); do
+				cc=$(echo "${columns_to_select_arr[$i]}" | cut -d'.' -f2)
+				fields_positions[$i]=$( grep -n ^"$cc" "${tables_in_columns_arr[$i]}" | cut -d' ' -f1 )
+				echo "cc is $cc"
+				if [[ "${tables_in_columns_arr[$i]}" == "$t1" ]]; then
+					if [[ "${fields_positions[$i]}" -lt $t1_join_field_pos ]]; then
+						#increase the field as it will get shifted
+						fields_positions[$i]+=1
+					fi
+				else
+					if [[ "${fields_positions[$i]}" -lt $t2_join_field_pos ]]; then
+						#increase the field as it will get shifted
+						fields_positions[$i]+=1
+					fi
+				fi
+			done
+			echo "fields_positions: ${fields_positions[@]}"
+		else
+			echo "in else"
+			echo ""
+		fi
+
+		#echo selected columns only
+		output=$(echo "$joined_output" | cut -d' ' -f${fields_positions[@]})
+	fi
+}'
+do_join() {
+    cmd="$1"
+    declare -a columns_to_select_arr=()
+    columns=""
+    tables_in_columns=""
+    tables_exist_in_columns=false
+    free_fields_arr=()
+    on=""
+    all_selected=false
+    declare -a on_arr=()
+    declare -a tables_in_columns_arr=()
+    declare -a fields_with_tables_arr=()
+
+    # Extract columns
+    if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alnum:]_[:space:],\(\)\.]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
+        columns=$(echo "${BASH_REMATCH[1]}" | tr -d ' ')
+        mapfile -t columns_to_select_arr < <(echo "$columns" | tr ',' $'\n')
+        if [[ "$cmd" =~ .(\.). ]]; then
+            tables_exist_in_columns=true
+        fi
+    elif [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+(\*)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
+        all_selected=true
+    fi
+
+    # Extract table names if exist in columns array
+    if [[ ! $all_selected && "$tables_exist_in_columns" ]]; then
+        for fname in "${columns_to_select_arr[@]}"; do
+            if [[ "$fname" =~ ([a-zA-Z0-9_-]+)(\.)[a-zA-Z0-9_-]+ ]]; then
+                tname=$(echo "$fname" | cut -d'.' -f1)
+                f=$(echo "$fname" | cut -d'.' -f2)
+                fields_with_tables_arr+=("$f")
+                table_exists_in_arr=false
+                if [[ "${tables_in_columns_arr[*]}" =~ " $tname " ]]; then
+                    table_exists_in_arr=true
+                fi
+                if [[ ! $table_exists_in_arr ]]; then
+                    tables_in_columns_arr+=("$tname")
+                fi
+            else
+                free_fields_arr+=("$fname")
+            fi
+            if [[ "$fname" =~ ^(\.)[a-zA-Z0-9_-]* || "$fname" =~ [a-zA-Z0-9_-]*(\.)$ || "$fname" =~ ^(\.)$ ]]; then
+                echo "Malformed input fields"
+                return
+            fi
+        done
+        # Check that tables exist in the db
+        declare -i length="${#tables_in_columns_arr[@]}"
+        for (( i = 0; i < $length; i++ )); do
+            exists=false
+            f="${fields_with_tables_arr[$i]}"
+            t="${tables_in_columns_arr[$i]}"
+            if [[ -n $(grep ^"$f:" "$cur_db/.$t") ]]; then
+                exists=true
+            fi
+            if [[ ! $exists ]]; then
+                echo "Field [$f] doesn't exist in table [$t]"
+                return
+            fi
+        done
+    fi
+
+    # Extract tables
+    if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]+[Jj][Oo][Ii][Nn][[:space:]]+([a-zA-Z0-9_-]+) ]]; then
+        t1="${BASH_REMATCH[1]}"
+        t2="${BASH_REMATCH[2]}"
+    else
+        echo "Please enter 2 tables to join"
+        return
+    fi
+
+    # Check all tables in columns array match
+    if [[ $tables_exist_in_columns ]]; then
+        for t in "${tables_in_columns_arr[@]}"; do
+            if [[ "$t" != "$t1" && "$t" != "$t2" ]]; then
+                echo "table [$t] doesn't exist in the join clause tables"
+                return
+            fi
+        done
+    fi
+
+    # Check all free fields exist in exactly one of the two tables
+    if [[ ! $all_selected ]]; then
+        for freef in "${free_fields_arr[@]}" ; do
+            t1_match=$(grep "^$freef:" "$cur_db/.$t1")
+            t2_match=$(grep "^$freef:" "$cur_db/.$t2")
+            if [[ -z "$t1_match" && -z "$t2_match" ]]; then
+                echo "Field [$freef] doesn't exist in either of the two tables [$t1] [$t2]"
+                return
+            elif [[ -n "$t1_match" && -n "$t2_match" ]]; then
+                echo "Field [$freef] is ambiguous; it exists in both tables [$t1] and [$t2]"
+                return
+            fi
+        done
+    fi
+
+    # Get ON condition
+    if [[ "$cmd" =~ [Oo][Nn](.*) ]]; then
+        on=$(echo "${BASH_REMATCH[1]}" | tr -d ' ' | tr -d ';')
+        mapfile -t on_arr < <(echo "$on" | tr '=' $'\n')
+    else
+        echo "You must provide valid ON clause"
+        return
+    fi
+
+    # Check ON clause fields
+    if [[ ${#on_arr[@]} -ne 2 ]]; then
+        echo "Malformed ON clause"
+        return
+    fi
+
+    declare -a on_tables=()
+    declare -a on_fields=()
+    for o in "${on_arr[@]}"; do
+        t=$(echo "$o" | cut -d'.' -f1)
+        f=$(echo "$o" | cut -d'.' -f2)
+        if [[ -z $(grep ^"$f:" "$cur_db/.$t") ]]; then
+            echo "Field [$f] doesn't exist in table [$t]"
+            return
+        fi
+        on_tables+=("$t")
+        on_fields+=("$f")
+    done
+
+    # Check fields are of the same datatypes
+    t1_join_field_type=$(grep ^"${on_fields[0]}:" "$cur_db/.$t1" | cut -d: -f2)
+    t2_join_field_type=$(grep ^"${on_fields[1]}:" "$cur_db/.$t2" | cut -d: -f2)
+    if [[ "$t1_join_field_type" != "$t2_join_field_type" ]]; then
+        echo "fields [${on_arr[0]}] and [${on_arr[1]}] are not of the same type"
+        return
+    fi
+
+    # Start joining tables on common fields
+    declare -i t1_join_field_pos=$(grep -n "$(echo "${on_arr[0]}" | cut -d'.' -f2)" "$cur_db/.$t1" | cut -d: -f1)
+    declare -i t2_join_field_pos=$(grep -n "$(echo "${on_arr[1]}" | cut -d'.' -f2)" "$cur_db/.$t2" | cut -d: -f1)
+
+    if [[ "$t1_join_field_type" == "int" ]]; then
+        tr ':' ' ' < "$cur_db/$t1" | sort -nk$t1_join_field_pos > t1_sorted
+        tr ':' ' ' < "$cur_db/$t2" | sort -nk$t2_join_field_pos > t2_sorted
+    else
+        tr ':' ' ' < "$cur_db/$t1" | sort -k$t1_join_field_pos > t1_sorted
+        tr ':' ' ' < "$cur_db/$t2" | sort -k$t2_join_field_pos > t2_sorted
+    fi
+
+    joined_output=$(join -1 $t1_join_field_pos -2 $t2_join_field_pos t1_sorted t2_sorted | tr ' ' ':')
+    rm -f t1_sorted t2_sorted
+
+    if [[ $all_selected == true ]]; then
+        echo "$joined_output"
+    else
+        # Get the position of each selected column in the joined output
+        declare -a fields_positions=()
+        t1_fields=($(grep -v '^#' "$cur_db/.$t1" | cut -d: -f1))
+        t2_fields=($(grep -v '^#' "$cur_db/.$t2" | cut -d: -f1))
+        declare -a joined_fields=("${on_fields[0]}")
+        for f in "${t1_fields[@]}"; do
+            if [[ "$f" != "${on_fields[0]}" ]]; then
+                joined_fields+=("$f")
+            fi
+        done
+        for f in "${t2_fields[@]}"; do
+            if [[ "$f" != "${on_fields[1]}" ]]; then
+                joined_fields+=("$f")
+            fi
+        done
+
+        for col in "${columns_to_select_arr[@]}"; do
+            table=""
+            field=""
+            if [[ "$col" =~ ([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+) ]]; then
+                table="${BASH_REMATCH[1]}"
+                field="${BASH_REMATCH[2]}"
+            else
+                field="$col"
+                t1_match=$(grep "^$field:" "$cur_db/.$t1")
+                t2_match=$(grep "^$field:" "$cur_db/.$t2")
+                if [[ -n "$t1_match" && -z "$t2_match" ]]; then
+                    table="$t1"
+                elif [[ -z "$t1_match" && -n "$t2_match" ]]; then
+                    table="$t2"
+                else
+                    echo "Field [$field] is ambiguous or not found in either table [$t1] or [$t2]"
+                    return
+                fi
+            fi
+            for i in "${!joined_fields[@]}"; do
+                if [[ "${joined_fields[$i]}" == "$field" && ( "$table" == "$t1" || "$table" == "$t2" || "$field" == "${on_fields[0]}" ) ]]; then
+                    fields_positions+=($((i + 1)))
+                    break
+                fi
+            done
+        done
+
+        if [[ ${#fields_positions[@]} -eq 0 ]]; then
+            echo "Error: No valid field positions found"
+            return
+        fi
+
+        output=$(echo "$joined_output" | cut -d':' -f"${fields_positions[*]}" | tr ' ' ':')
+        echo "$output"
+    fi
 }
 #handle the select command
 do_select(){
