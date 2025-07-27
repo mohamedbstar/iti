@@ -211,10 +211,9 @@ do_drop_table(){
 }
 #handles aggregation
 do_aggregate(){
-	echo "aggregating..."
 	cmd="$1"
 	#extract aggregation functions
-	allowed_agg_funcs=("count" "COUNT" "max" "MAX" "min" "MIN" "sum" "SUM")
+	allowed_agg_funcs=("count" "COUNT" "max" "MAX" "min" "MIN" "sum" "SUM" "avg" "AVG")
 	agg_funcs=""
 	table_name=""
 	group_by_field=""
@@ -222,7 +221,6 @@ do_aggregate(){
 	declare -i group_by_field_pos=0
 	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([a-zA-Z0-9\(\)[:space:],\*_-]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
 		agg_funcs="${BASH_REMATCH[1]}"
-		echo "agg_funcs: $agg_funcs"
 	else
 		echo "You must provide at least one aggregate function."
 		return
@@ -230,7 +228,6 @@ do_aggregate(){
 	#extract table name
 	if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]+[Gg][Rr][Oo][Uu][Pp] ]]; then
 		table_name="${BASH_REMATCH[1]}"
-		echo "table_name is: $table_name"
 		#check the table exists in the cur_db
 		exists=$(echo "$cur_db_tables" | grep ^"$table_name"$)
 		if [[ -z "$exists" ]]; then
@@ -245,7 +242,6 @@ do_aggregate(){
 	#extract group by field
 	if [[ "$cmd" =~ [Gg][Rr][Oo][Uu][Pp][[:space:]]+[Bb][Yy][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]*[";"][[:space:]]* ]]; then
 		group_by_field="${BASH_REMATCH[1]}"
-		echo "group by field is $group_by_field"
 		#check the field exists in the table
 		exists=$(cat "$cur_db/.$table_name" | grep ^"$group_by_field:")
 		if [[ -z "$exists" ]]; then
@@ -258,12 +254,8 @@ do_aggregate(){
 		return
 	fi
 	agg_funcs=$(replaceMultipleSpaces "$agg_funcs" | tr -d ' ')
-	echo "agg_funcs: $agg_funcs"
 	
 	IFS="," read -a agg_funcs_arr <<< "$agg_funcs"
-	for i in "${agg_funcs_arr[@]}"; do
-		echo "agg: $i"
-	done
 	agg_funcs_names=()
 	agg_funcs_fields=()
 	for inp in "${agg_funcs_arr[@]}"; do
@@ -272,8 +264,6 @@ do_aggregate(){
 		agg_funcs_names+=("$f")
 		agg_funcs_fields+=("$v")
 	done
-	echo "funcs_names: ${agg_funcs_names[@]}"
-	echo "funcs_fields: ${agg_funcs_fields[@]}"
 	#check that each function is allowed
 	for fun in "${agg_funcs_names[@]}"; do
 		found=false
@@ -284,7 +274,6 @@ do_aggregate(){
     		fi
 		done
 		if ! $found ; then
-			echo "found: $found"
 			echo "Function [$fun] is not recognisable"
 			return
 		fi
@@ -312,7 +301,6 @@ do_aggregate(){
 	else
 		sorted_records=$(cat "$cur_db/$table_name" | sort -t: -k$group_by_field_pos)
 	fi
-	echo "$sorted_records"
 	#then do the functions on sorted records
 	results=()
 	#create a map of [value : count] of group_by_field
@@ -321,76 +309,58 @@ do_aggregate(){
 	declare -A uniqe_values_map=()
 	mapfile -t uniqe_values_arr < <(echo "$sorted_records" | cut -d: -f${group_by_field_pos} | uniq -c | sed 's/^[[:space:]]*//' | tr -s ' ' ':')
 	for line in "${uniqe_values_arr[@]}"; do
-		echo "line is $line"
 		c=$(echo "$line" | cut -d: -f1)
 		v=$(echo "$line" | cut -d: -f2)
 		uniqe_values_map["$v"]="$c"
 	done
-	echo "uniqe_values: $uniqe_values"
-	echo "unique values: ${uniqe_values[@]}"
-	echo "uniqe_values_map: ${!uniqe_values_map[@]}"
 	declare -i idx=0
 	for func in "${agg_funcs_names[@]}"; do
 		field_to_operate_on=${agg_funcs_fields[$idx]}
 		field_to_operate_on_type=$(grep ^"$field_to_operate_on:" "$cur_db/.$table_name" | cut -d: -f2)
 		field_to_operate_on_pos=$(grep -n ^"$field_to_operate_on:"  "$cur_db/.$table_name"| cut -d: -f1)
 		if [[ "$func" =~ ^"count"$ || "$func" =~ ^"COUNT"$  ]]; then
-			echo "counting..."
 			#get unique values => loop over them each time grepping rows of that unique value and then counting rows for each unique value
 			echo "============= COUNT ============="
 			for k in "${!uniqe_values_map[@]}"; do
 				echo "$k: ${uniqe_values_map[$k]}"
 			done
 		elif [[ "$func" =~ ^"max"$ || "$func" =~ ^"MAX"$ ]]; then
-			echo "maxing..."
-			#field to be maxed out must be int
-			
+			#field to be maxed out must be int			
 			field_to_be_maxed=${agg_funcs_fields[$idx]}
-			echo "after field_to_be_maxed"
 			its_type=$(grep ^"$field_to_be_maxed:" "$cur_db/.$table_name" | cut -d: -f2)
-			echo "before if"
 			if [[ "$its_type" != "int" && "$its_type" != "INT" ]]; then
 				echo "Can't do max operation of field [$field_to_be_maxed] of type not int"
 				continue
 			fi
 			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
 			declare -A max=()
-			echo "Entering for"
 			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
 				v="${uniqe_values_map[$k]}"
 				declare -i field_max=$(( -2**63 ))
 				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
-				echo "relevant rows for $v are $relevant_rows"
 				#get the max of the field field_to_be_maxed by getting its position first and then maxing this column
 				field_to_be_maxed_pos=$(grep -n ^"$field_to_be_maxed:"  "$cur_db/.$table_name"| cut -d: -f1)
 				field_max=$(echo "$relevant_rows" | cut -d: -f$field_to_be_maxed_pos | sort -nr | head -1)
 				echo "field max is: $field_max"
 			done
 		elif [[ "$func" =~ ^"min"$ || "$func" =~ ^"MIN"$ ]]; then
-			echo "minig..."
 			#must be a number
 			field_to_be_minned=${agg_funcs_fields[$idx]}
-			echo "after field_to_be_maxed"
 			its_type=$(grep ^"$field_to_be_minned:" "$cur_db/.$table_name" | cut -d: -f2)
-			echo "before if"
 			if [[ "$its_type" != "int" && "$its_type" != "INT" ]]; then
 				echo "Can't do max operation of field [$field_to_be_minned] of type not int"
 				continue
 			fi
 			#get unique values => loop over them each time grepping rows of that unique value and then max by agg_func_field
-			echo "Entering for"
-			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
-				
+			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group				
 				declare -i field_min=$(( 2**64 ))
 				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
-				echo "relevant rows for $v are $relevant_rows"
 				#get the max of the field field_to_be_maxed by getting its position first and then maxing this column
 				field_to_be_minned_pos=$(grep -n ^"$field_to_be_minned:"  "$cur_db/.$table_name"| cut -d: -f1)
 				field_min=$(echo "$relevant_rows" | cut -d: -f$field_to_be_minned_pos | sort -n | head -1)
 				echo "field min is: $field_min"
 			done
 		else
-			echo "summing"
 			#must be a number
 			#get unique values => loop over them each time grepping rows of that unique value and then add agg_func_field for each unique value
 			if [[ "$field_to_operate_on_type" != "int" && "$field_to_operate_on_type" != "INT" ]]; then
@@ -400,11 +370,7 @@ do_aggregate(){
 			for k in "${!uniqe_values_map[@]}"; do #k here is considered a group
 				declare -i field_sum=0
 				relevant_rows=$(awk -F: -v pos="$group_by_field_pos" -v val="$k" '$pos == val' "$cur_db/$table_name")
-				echo "relevant rows for $k are $relevant_rows"
-				mapfile -t relevant_rows_arr < <(echo "$relevant_rows")
-				echo "relevant_rows_arr: "
 				for i in "${relevant_rows_arr[@]}"; do
-					echo "$i"
 					field_sum+=$(echo "$i" | cut -d: -f$field_to_operate_on_pos)
 				done 
 				echo "sum for field [$k] is $field_sum"
@@ -414,208 +380,6 @@ do_aggregate(){
 	done
 }
 #handles join operation
-: 'do_join(){
-	#syntax is select column1[column2|...] from table1 join table2 on field1=field2
-	cmd="$1"
-	declare -a columns_to_select_arr=()
-	#extract columns
-	columns=""
-	tables_in_columns=""
-	tables_exist_in_columns=false
-	free_fields_arr=()
-	on=""
-	all_selected=false
-	declare -a on_arr=()
-	declare -a tables_in_columns_arr=()
-	declare -a fields_with_tables_arr=()
-	if [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+([[:alnum:]_[:space:],\(\)\.]+)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
-    	columns=$(echo "${BASH_REMATCH[1]}" | tr -d ' ')
-    	mapfile -t columns_to_select_arr < <(echo "$columns" | tr ',' $'\n')
-    	
-    	if [[ "$cmd" =~ .(\.). ]]; then
-    		#tables exist
-    		echo "tables exist"
-    		tables_exist_in_columns=true
-    	fi
-    elif [[ "$cmd" =~ ^[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]]+(\*)[[:space:]]+[Ff][Rr][Oo][Mm] ]]; then
-    	all_selected=true
-    	echo "* is used"
-    	echo "all_selected is $all_selected"
-	fi
-	#extract table names if exist in columns array
-	if [[ $(! $all_selected) && "$tables_exist_in_columns" ]]; then
-		for fname in "${columns_to_select_arr[@]}"; do
-			if [[ "$fname" =~ ([a-zA-Z0-9_-]+)(\.)[a-zA-Z0-9_-]+ ]]; then
-				tname=$(echo "$fname" | cut -d'.' -f1)
-				f=$(echo "$fname" | cut -d'.' -f2)
-				fields_with_tables_arr+=("$f")
-				
-				echo "table is $tname"
-				echo "field is $f"
-				table_exists_in_arr=false
-				for tt in "${tables_in_columns_arr[@]}"; do
-					if [[ "$tt" == "$tname" ]]; then
-						table_exists_in_arr=true
-						break
-					fi
-				done
-				if [[ (! $table_exists_in_arr) ]]; then
-					tables_in_columns_arr+=("$tname")
-				fi
-
-			else
-				free_fields_arr+=("$fname")
-			fi
-			#check for malformed input
-			if [[ "$fname" =~ ^(\.)[a-zA-Z0-9_-]* || "$fname" =~ [a-zA-Z0-9_-]*(\.)$ || "$fname" =~ ^(\.)$ ]]; then
-				echo "Malformed input fields"
-				return
-			fi
-		done
-		#check those tables exists in the db
-		declare -i length="${#tables_in_columns_arr[@]}"
-		for (( i = 0; i < $length; i++ )); do
-			exists=false
-			#see the corresponding field exists in the corresponding column 
-			f="${fields_with_tables_arr[$i]}"
-			t="${tables_in_columns_arr[$i]}"
-			if [[ -n $(grep ^"$f:" "$cur_db/.$t") ]]; then
-				exists=true
-			fi
-			if [[ ! $exists ]]; then
-				echo "Field [$f] doesn't exist in table [$t]"
-				return
-			fi
-		done
-	fi
-	#extract tables
-	if [[ "$cmd" =~ [Ff][Rr][Oo][Mm][[:space:]]+([a-zA-Z0-9_-]+)[[:space:]]+[Jj][Oo][Ii][Nn][[:space:]]+([a-zA-Z0-9_-]+) ]]; then
-		t1="${BASH_REMATCH[1]}"
-		t2="${BASH_REMATCH[2]}"
-	else
-		echo "Please enter 2 tables to join"
-		return
-	fi
-	#if tables exist in columns array ===> check they all match
-	if [[ $tables_exist_in_columns ]]; then
-		for t in "${tables_in_columns_arr[@]}"; do
-			if [[ "$t" != "$t1" && "$t" != "$t2" ]]; then
-				echo "table [$t] doesn't exist in the join clause tables"
-				return
-			fi
-		done
-	fi
-	#check all free fields exist in exactky one of the two tables;
-	if [[ ! $all_selected  ]]; then
-		echo "checking each field"
-		for freef in "${free_fields_arr[@]}" ; do
-			if [[ -z $(grep "$freef" "$cur_db/.$t1") && -z $(grep "$freef" "$cur_db/.$t2") ]]; then
-				echo "Field [$freef] doesn't exist in either of the two tables [$t1] [$t2]"
-				return
-			fi
-		done
-	fi
-	#get on condition
-	if [[ "$cmd" =~ [Oo][Nn](.*) ]]; then
-		on=$(echo "${BASH_REMATCH[1]}" | tr -d ' ' | tr -d ';')
-		mapfile -t on_arr < <(echo "$on" | tr '=' $'\n')
-	else
-		echo "You must provide valid ON caluse"
-		return
-	fi
-	#check that each field in on caluse exists in the table mentioned before it
-	# on_arr should now contain 2 fields like "x.id" and "x2.id"
-	if [[ ${#on_arr[@]} -ne 2 ]]; then
-		echo "Malformed ON clause"
-		return
-	fi
-
-	declare -a on_tables=()
-	declare -a on_fields=()
-	for o in "${on_arr[@]}"; do
-		t=$(echo "$o" | cut -d'.' -f1)
-		f=$(echo "$o" | cut -d'.' -f2)
-		if [[ -z $(grep ^"$f:" "$cur_db/.$t") ]]; then
-			echo "Field [$f] doesn't exist in table [$t]"
-			return
-		fi
-		on_tables+=("$t")
-		on_fields+=("$f")
-	done
-
-	#check fields are of the same datatypes
-	t1_join_field_type=$(grep ^"${on_fields[0]}:" "$cur_db/.$t1" | cut -d: -f2)
-	t2_join_field_type=$(grep ^"${on_fields[1]}:" "$cur_db/.$t2" | cut -d: -f2)
-	if [[ "$t1_join_field_type" != "$t2_join_field_type" ]]; then
-		echo "fields [${on_arr[0]}] and [${on_arr[1]}] are not of the same type"
-		return
-	fi
-	#start joining tables on common fields
-	declare -i t1_join_field_pos=$(grep -n "$(echo "${on_arr[0]}" | cut -d'.' -f2)" "$cur_db/.$t1" | cut -d: -f1)
-	declare -i t2_join_field_pos=$(grep -n "$(echo "${on_arr[1]}" | cut -d'.' -f2)" "$cur_db/.$t2" | cut -d: -f1)
-
-	echo "before sort"
-	echo "t1_join_field_pos: $t1_join_field_pos"
-	echo "t2_join_field_pos: $t2_join_field_pos"
-	echo "t1 is $t1 is $t2"
-	echo "t1 field type is $t1_join_field_type"
-	echo "t2 field type is $t2_join_field_type"
-	if [[ "$t1_join_field_type" == "int" ]]; then
-		tr ':' ' ' < "$cur_db/$t1" | sort -nk$t1_join_field_pos > t1_sorted
-		tr ':' ' ' < "$cur_db/$t2" | sort -nk$t2_join_field_pos > t2_sorted
-		echo "in number"
-		#t1_sorted=$(cat "$cur_db/$t1" | tr ':' ' ' | sort -nk$t1_join_field_pos)
-		#t2_sorted=$(cat "$cur_db/$t2" | tr ':' ' ' | sort -nk$t2_join_field_pos)
-	else
-		tr ':' ' ' < "$cur_db/$t1" | sort -k$t1_join_field_pos > t1_sorted
-		tr ':' ' ' < "$cur_db/$t2" | sort -k$t2_join_field_pos > t2_sorted
-	fi
-	echo "======== t1 sorted ======="
-	(cat "t1_sorted")
-	echo "======== t2 sorted ======="
-	(cat "t2_sorted")
-	joined_output=$(join -1 $t1_join_field_pos  -2 $t2_join_field_pos  t1_sorted t2_sorted | tr ' ' ':')
-	(rm -f t1_sorted t2_sorted)
-	echo "joined output: "
-	
-	#the behaviour of join: get the jon_field first then list all remaining 
-	echo "after: all_selected: $all_selected"
-	if [[ $($all_selected == true) ]]; then
-		echo "echoing *"
-		echo "$joined_output"
-	else
-		#get the position of each selected columns from inside sorted_t1 and sorted_t2
-		#columns_to_select_arr
-		#tables_in_columns_arr
-		declare -a fields_positions=()
-		echo "tables_in_columns_arr= ${#tables_in_columns_arr[@]}"
-		if [[ ${#fields_with_tables_arr[@]} == ${#tables_in_columns_arr[@]} ]]; then
-			for (( i = 0; i < ${#tables_in_columns_arr[@]}; i++ )); do
-				cc=$(echo "${columns_to_select_arr[$i]}" | cut -d'.' -f2)
-				fields_positions[$i]=$( grep -n ^"$cc" "${tables_in_columns_arr[$i]}" | cut -d' ' -f1 )
-				echo "cc is $cc"
-				if [[ "${tables_in_columns_arr[$i]}" == "$t1" ]]; then
-					if [[ "${fields_positions[$i]}" -lt $t1_join_field_pos ]]; then
-						#increase the field as it will get shifted
-						fields_positions[$i]+=1
-					fi
-				else
-					if [[ "${fields_positions[$i]}" -lt $t2_join_field_pos ]]; then
-						#increase the field as it will get shifted
-						fields_positions[$i]+=1
-					fi
-				fi
-			done
-			echo "fields_positions: ${fields_positions[@]}"
-		else
-			echo "in else"
-			echo ""
-		fi
-
-		#echo selected columns only
-		output=$(echo "$joined_output" | cut -d' ' -f${fields_positions[@]})
-	fi
-}'
 do_join() {
     cmd="$1"
     declare -a columns_to_select_arr=()
@@ -790,12 +554,15 @@ do_join() {
                 field="${BASH_REMATCH[2]}"
             else
                 field="$col"
-                t1_match=$(grep "^$field:" "$cur_db/.$t1")
-                t2_match=$(grep "^$field:" "$cur_db/.$t2")
+                t1_match=$(grep -E ^"$field:" "$cur_db/.$t1")
+                t2_match=$(grep -E ^"$field:" "$cur_db/.$t2")
+                echo "t1_match: $t1_match t2_match: $t2_match"
                 if [[ -n "$t1_match" && -z "$t2_match" ]]; then
                     table="$t1"
                 elif [[ -z "$t1_match" && -n "$t2_match" ]]; then
                     table="$t2"
+                elif [[ -n "$t1_match" && -n "$t2_match"  ]]; then
+                	table="$t1"
                 else
                     echo "Field [$field] is ambiguous or not found in either table [$t1] or [$t2]"
                     return
@@ -1151,8 +918,11 @@ do_insert(){
     		fi
 		done
 	fi
-	#store output into table
-	(echo "$output" >> "$cur_db/$table_to_insert")
+	
+	
+	#aquire database lock store output into table
+	exec 200>"${cur_db}_lock"
+	flock 200 sh -c "echo \"$output\" >> \"$cur_db/$table_to_insert\""
 	echo "inserted values [$values_to_insert]"
 }
 
@@ -1409,6 +1179,7 @@ while true; do
 			#create a new folder with the given name
 			mkdir "$db_name"
 			touch "$db_name/.db"
+			touch "${db_name}_lock" #lock file for doin write operation on the database
 			#update the dbs_list variable
 			dbs_list+=$'\n'$db_name
 			dbs_list=$(echo "$dbs_list" | sort -k1)
