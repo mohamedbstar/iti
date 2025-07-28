@@ -1227,7 +1227,6 @@ while true; do
 		;;
 
 	*)
-		echo "your input is $user_cmd"
 		echo "invalid syntax."
 		;;
 	esac

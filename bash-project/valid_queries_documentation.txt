@@ -1,0 +1,57 @@
+The parser in the mainloop tolerates:
+	1)multiple spaces inside queries
+	2)new lines inside queries (accepts multi-line queries)
+	3)case insensitivity (CREATE|create|CrEaTe)
+
+The insert, update and delete operation are thread safe as thses operations use flock to lock the file while writing
+
+Note: all queries can be multi-line
+
+=========================Available queries=========================
+
+1)create database db_name;
+2)use db_name; (if not existing echoes error and returns to mainloop)
+3)show databases;
+4)show tables (must use a database first)
+5)drop database db_name; (if not existing echoes error and returns to mainloop)
+
+6)drop table_name; (must use a databse first and if not existing echoes error and returns to mainloop)
+7)create table tname (id int pk, .......) 
+8)describe table_name; (must use a databse first and if not existing echoes error and returns to mainloop)
+
+9)select * from table_name;
+10)select field1,....,fieldn from table_name; (checks for table existance and fields existence inside the table)
+11)select * from table_name where field=value; [WHERE CLAUSE] (chceks for existence of table, existence of field inside the table)
+12)select field1,...,fieldn) from table_name where field=value; [WHERE CLAUSE] (chceks for existence of table, existence of field inside the table and existence of field1,...,fieldn inside the table)
+
+11)select count(*) from table_name group by field; [AGGREGATION]
+12)select max(field) from table_name group by field; [AGGREGATION] (checks for field to be of type int)
+13)select min(field) from table_name group by field; [AGGREGATION] (checks for field to be of type int)
+14)select sum(field) from table_name group by field; [AGGREGATION] (checks for field to be of type int)
+15)select count(*),max(field1),min(field2) from table_name group by field; [AGGREGATION]
+
+16)select field1,....,fieldn from table1 join table2 on table1.field = table2.field; [JOIN OPERATION] (checks for existence of tables and fields inside them)
+17)select table1.field,table2.field,field3 from table1 join table2 on table1.field = table2.field; [JOIN OPERATION] (checks for existence of tables and fields inside them)
+
+
+18)insert into table_name values(v1,....,v2) (checks for equal number of values to table fields and also checks for type matching and PK constraints)
+19)insert into table_name(field1,..,fieldn) values(v1,...,vn); (checks for equal number of values to fields and also checks for type matching and PK constraints and the existence of field1,...,fieldn in the table)
+
+20)update table_name set field=value; (updates all rows) (checks for existence of table and existence of field inside table)
+21)update table_name set field=value where field2=value2; (updates specific rows) (checks for existence of table and existence of field inside table and existence of field2 inside table)
+
+22)delete from table_name;(deletes all rows) (checks for existence of table)
+23)delete from table_name where field=value;(deletes all rows) (checks for existence of table and existence of field inside table)
+
+24)exit; | ex; | exi; (exits the program)
+
+
+
+
+
+
+
+
+
+
+
